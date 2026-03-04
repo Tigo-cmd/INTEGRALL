@@ -1,0 +1,32 @@
+# Integrall Backend Requirements
+# Install with: pip install -r requirements.txt
+
+# Web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Database (async SQLite for v0.1, PostgreSQL ready for v1.0)
+sqlalchemy[asyncio]==2.0.23
+aiosqlite==0.19.0
+alembic==1.12.1  # Database migrations
+
+# Data validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Async HTTP client (for calling external services)
+httpx==0.25.2
+
+# Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Utilities
+python-dotenv==1.0.0
+structlog==23.2.0  # Structured logging
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2  # For testing

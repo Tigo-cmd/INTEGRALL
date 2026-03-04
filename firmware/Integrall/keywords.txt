@@ -1,0 +1,48 @@
+#######################################
+# Syntax Coloring Map For Integrall
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+Integrall	KEYWORD1
+System	KEYWORD1
+DeviceConfig	KEYWORD1
+DeviceState	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+begin	KEYWORD2
+handle	KEYWORD2
+enableRelay	KEYWORD2
+relayOn	KEYWORD2
+relayOff	KEYWORD2
+relayToggle	KEYWORD2
+relaySetTimeout	KEYWORD2
+relaySetInterlock	KEYWORD2
+relayAttachButton	KEYWORD2
+relayIsOn	KEYWORD2
+allRelaysOff	KEYWORD2
+isOnline	KEYWORD2
+isWiFiConnected	KEYWORD2
+getDeviceId	KEYWORD2
+getIPAddress	KEYWORD2
+getWiFiStrength	KEYWORD2
+getStatusString	KEYWORD2
+reconnect	KEYWORD2
+sendTelemetry	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+INTEGRALL_ENABLE_RELAY	LITERAL1
+INTEGRALL_ENABLE_KEYPAD	LITERAL1
+INTEGRALL_ENABLE_OLED	LITERAL1
+INTEGRALL_ENABLE_LCD	LITERAL1
+INTEGRALL_DEBUG_LEVEL	LITERAL1
+ONLINE	LITERAL1
+WIFI_CONNECTED	LITERAL1
