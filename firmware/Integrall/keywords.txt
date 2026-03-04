@@ -3,16 +3,16 @@
 #######################################
 
 #######################################
-# Datatypes (KEYWORD1)
+# Datatypes (KEYWORD1 - Color 1)
 #######################################
 
 Integrall	KEYWORD1
 System	KEYWORD1
 DeviceConfig	KEYWORD1
-DeviceState	KEYWORD1
+RelayConfig	KEYWORD1
 
 #######################################
-# Methods and Functions (KEYWORD2)
+# Methods and Functions (KEYWORD2 - Color 2)
 #######################################
 
 begin	KEYWORD2
@@ -26,6 +26,9 @@ relaySetInterlock	KEYWORD2
 relayAttachButton	KEYWORD2
 relayIsOn	KEYWORD2
 allRelaysOff	KEYWORD2
+lcdPrint	KEYWORD2
+lcdClear	KEYWORD2
+lcdBacklight	KEYWORD2
 isOnline	KEYWORD2
 isWiFiConnected	KEYWORD2
 getDeviceId	KEYWORD2
@@ -40,9 +43,7 @@ sendTelemetry	KEYWORD2
 #######################################
 
 INTEGRALL_ENABLE_RELAY	LITERAL1
+INTEGRALL_ENABLE_LCD	LITERAL1
 INTEGRALL_ENABLE_KEYPAD	LITERAL1
 INTEGRALL_ENABLE_OLED	LITERAL1
-INTEGRALL_ENABLE_LCD	LITERAL1
 INTEGRALL_DEBUG_LEVEL	LITERAL1
-ONLINE	LITERAL1
-WIFI_CONNECTED	LITERAL1

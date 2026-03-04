@@ -61,6 +61,18 @@
 #include "modules/RelayModule.h"
 #endif
 
+#if INTEGRALL_MODULE_LCD_ENABLED
+#include "modules/LCDModule.h"
+#endif
+
+#if INTEGRALL_MODULE_SENSORS_ENABLED
+#include "modules/SensorModule.h"
+#endif
+
+#if INTEGRALL_MODULE_SERVO_ENABLED
+#include "modules/ServoModule.h"
+#endif
+
 // ============================================================================
 // MAIN SYSTEM CLASS
 // ============================================================================
@@ -84,6 +96,11 @@ public:
      * Handles WiFi, backend communication, module updates
      */
     void handle();
+    
+    /**
+     * Start the system without WiFi (for basic Arduino boards)
+     */
+    bool begin();
     
     // ========================================================================
     // RELAY MODULE API (available if INTEGRALL_ENABLE_RELAY is defined)
@@ -154,6 +171,98 @@ public:
     #endif  // INTEGRALL_MODULE_RELAY_ENABLED
     
     // ========================================================================
+    // LCD MODULE API (available if INTEGRALL_ENABLE_LCD is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    
+    /**
+     * Print text to I2C LCD
+     * @param text Text to display
+     * @param col Column (0-15)
+     * @param row Row (0-1)
+     */
+    void lcdPrint(const char* text, uint8_t col = 0, uint8_t row = 0) {
+        _lcd_module.print(text, col, row);
+    }
+    
+    /**
+     * Clear the LCD screen
+     */
+    void lcdClear() {
+        _lcd_module.clear();
+    }
+    
+    /**
+     * Set the LCD backlight on or off
+     */
+    void lcdBacklight(bool on) {
+        _lcd_module.setBacklight(on);
+    }
+    
+    #endif  // INTEGRALL_MODULE_LCD_ENABLED
+    
+    // ========================================================================
+    // SENSOR MODULE API (available if INTEGRALL_ENABLE_SENSORS is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_SENSORS_ENABLED
+    
+    /**
+     * Read distance in CM using Ultrasonic (HC-SR04)
+     */
+    float readDistance(uint8_t trig, uint8_t echo) {
+        return _sensor_module.readDistanceCM(trig, echo);
+    }
+    
+    /**
+     * Read analog input as a percentage (0-100)
+     */
+    int readAnalogPercent(uint8_t pin) {
+        return _sensor_module.readAnalogPercent(pin);
+    }
+    
+    /**
+     * Read digital sensor like PIR Motion
+     */
+    bool isTriggered(uint8_t pin) {
+        return _sensor_module.isTriggered(pin);
+    }
+    
+    #endif // INTEGRALL_MODULE_SENSORS_ENABLED
+    
+    // ========================================================================
+    // SERVO MODULE API (available if INTEGRALL_ENABLE_SERVO is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_SERVO_ENABLED
+    
+    /**
+     * Control a servo motor
+     * @param pin GPIO pin for PWM
+     * @param angle Angle to set (0-180)
+     */
+    void setServo(uint8_t pin, uint8_t angle) {
+        _servo_module.attach(pin);
+        _servo_module.set(angle);
+    }
+    
+    /**
+     * Map a pot or sensor directly to a servo
+     */
+    void setServoFromAnalog(uint8_t servo_pin, uint8_t analog_pin) {
+        _servo_module.attach(servo_pin);
+        _servo_module.setFromAnalog(analog_pin);
+    }
+    
+    /**
+     * Start a non-blocking sweep of the servo
+     */
+    void sweepServo(uint8_t pin, uint32_t speed_ms = 15) {
+        _servo_module.attach(pin);
+        _servo_module.updateSweep(speed_ms);
+    }
+    
+    #endif // INTEGRALL_MODULE_SERVO_ENABLED
+    
+    // ========================================================================
     // SYSTEM STATUS API
     // ========================================================================
     
@@ -207,6 +316,18 @@ private:
     RelayModule _relay_module;
     int _relay_count;
     #endif
+
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    LCDModule _lcd_module;
+    #endif
+
+    #if INTEGRALL_MODULE_SENSORS_ENABLED
+    SensorModule _sensor_module;
+    #endif
+
+    #if INTEGRALL_MODULE_SERVO_ENABLED
+    ServoModule _servo_module;
+    #endif
     
     void _handleModules();
     void _dispatchCommand(const char* command_type, const JsonObject& params);
@@ -248,6 +369,12 @@ bool System::begin(const DeviceConfig& config) {
         INTEGRALL_LOG_ERROR("RelayModule initialization failed");
     }
     #endif
+
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    if (!_lcd_module.begin()) {
+        INTEGRALL_LOG_ERROR("LCDModule initialization failed");
+    }
+    #endif
     
     _initialized = true;
     INTEGRALL_LOG_INFO("=== Integrall System Ready ===");
@@ -260,8 +387,34 @@ void System::handle() {
     // Handle core device management
     _device_manager.handle();
     
+    // Auto-update LCD with WiFi status if enabled
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    static unsigned long _last_status_update = 0;
+    if (millis() - _last_status_update > 5000) {
+        if (!isWiFiConnected()) {
+            _lcd_module.print("WiFi Discon...", 0, 1);
+        } else if (!isOnline()) {
+            _lcd_module.print("Backend Error", 0, 1);
+        }
+        _last_status_update = millis();
+    }
+    #endif
+    
     // Handle modules
     _handleModules();
+}
+
+bool System::begin() {
+    INTEGRALL_LOG_INFO("=== Integrall Module Initialization ===");
+    
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    if (!_lcd_module.begin()) {
+        INTEGRALL_LOG_ERROR("LCDModule initialization failed");
+    }
+    #endif
+
+    _initialized = true;
+    return true;
 }
 
 void System::_handleModules() {

@@ -58,19 +58,30 @@ app = FastAPI(
     version=settings.VERSION,
     description="Unified IoT firmware framework backend - manages ESP32 devices, commands, and telemetry",
     lifespan=lifespan,
-    # Add API key auth to all routes by default
-    dependencies=[Depends(verify_api_key)]
 )
 
-# CORS middleware (configure for production)
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.DEBUG else [],  # Restrict in production
+    allow_origins=["*"] if settings.DEBUG else [],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+from fastapi.staticfiles import StaticFiles
+import os
+
+# Mount static files for the dashboard
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    
+    # Root redirect to dashboard
+    @app.get("/", tags=["UI"])
+    async def redirect_to_dashboard():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/static/index.html")
 
 # Public health check (no auth required)
 @app.get("/health", tags=["System"])
@@ -82,25 +93,11 @@ async def health_check():
         "version": settings.VERSION
     }
 
-
-# System status (protected)
-@app.get("/api/status", tags=["System"])
-async def system_status():
-    """Protected system status"""
-    uptime = time.time() - _start_time
-    return {
-        "status": "operational",
-        "version": settings.VERSION,
-        "uptime_seconds": int(uptime),
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-
-# Include API routers
-app.include_router(devices.router, prefix="/api", tags=["Devices"])
-app.include_router(commands.router, prefix="/api", tags=["Commands"])
-app.include_router(telemetry.router, prefix="/api", tags=["Telemetry"])
-app.include_router(system.router, prefix="/api", tags=["System"])
+# Include API routers (protected with API key)
+app.include_router(devices.router, prefix="/api", tags=["Devices"], dependencies=[Depends(verify_api_key)])
+app.include_router(commands.router, prefix="/api", tags=["Commands"], dependencies=[Depends(verify_api_key)])
+app.include_router(telemetry.router, prefix="/api", tags=["Telemetry"], dependencies=[Depends(verify_api_key)])
+app.include_router(system.router, prefix="/api", tags=["System"], dependencies=[Depends(verify_api_key)])
 
 
 if __name__ == "__main__":

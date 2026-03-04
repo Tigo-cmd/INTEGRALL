@@ -70,10 +70,13 @@ pio device monitor
 ```
 
 **Option B: Arduino IDE**
-1. Copy `firmware/Integrall` to your Arduino libraries folder
-2. Open `examples/BasicRelay/BasicRelay.ino`
-3. Update WiFi credentials and backend URL
-4. Upload to ESP32
+1. **Install Dependencies**: Open the Library Manager (`Ctrl+Shift+I`) and install:
+   - **ArduinoJson** (by Benoit Blanchon)
+   - **LiquidCrystal I2C** (for LCD support)
+2. Copy `firmware/Integrall` to your Arduino `libraries` folder.
+3. Open `examples/BasicRelay/BasicRelay.ino`.
+4. Update WiFi credentials and backend URL.
+5. Upload to ESP32.
 
 ### 4. See It Work!
 

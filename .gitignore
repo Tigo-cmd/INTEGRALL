@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+backend/venv/
+venv/
+ENV/
+env/
+
+# Databases
+*.db
+*.sqlite3
+
+# Environment Variables (Security!)
+.env
+backend/.env
+
+# PlatformIO folders
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Arduino / IDE folders
+*.log
+*.tmp
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Documentation / Scratch files (optional to ignore)
+# /tmp/
