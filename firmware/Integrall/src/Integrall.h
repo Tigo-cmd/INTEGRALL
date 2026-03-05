@@ -89,6 +89,8 @@
 #include "modules/RGBModule.h"
 #endif
 
+#include "modules/BlinkerModule.h"
+
 // ============================================================================
 // MAIN SYSTEM CLASS
 // ============================================================================
@@ -245,6 +247,14 @@ public:
      */
     int readAnalogPercent(uint8_t pin) {
         return _sensor_module.readAnalogPercent(pin);
+    }
+    
+    /**
+     * Read LDR light intensity as a percentage (0-100)
+     * @param reverse Set to true if 0=Bright (common with pull-up LDRs)
+     */
+    int readLightPercent(uint8_t pin, bool reverse = false) {
+        return _sensor_module.readLightPercent(pin, reverse);
     }
     
     /**
@@ -776,6 +786,22 @@ public:
      */
     void enableEventLog(bool enabled) { _event_log_enabled = enabled; }
 
+    /**
+     * Start a non-blocking blink on a pin
+     * @param pin      GPIO pin (e.g. 2 for ESP32 Built-in)
+     * @param interval Time in ms between flips
+     */
+    void blink(uint8_t pin, uint32_t interval = 1000) {
+        _blinker.begin(pin, interval);
+    }
+
+    /**
+     * Stop the current blinker
+     */
+    void stopBlink() {
+        _blinker.stop();
+    }
+
 private:
     DeviceManager _device_manager;
     DeviceConfig _config;
@@ -860,6 +886,7 @@ private:
     unsigned long _sw_last_motion = 0;
     #endif
 
+    BlinkerModule _blinker;
     bool _event_log_enabled = true;
 
     /**
@@ -967,6 +994,8 @@ void System::_handleModules() {
     #if INTEGRALL_MODULE_RELAY_ENABLED
     _relay_module.handle();
     #endif
+    
+    _blinker.handle();
 }
 
 // Relay Module implementations

@@ -51,7 +51,8 @@ No more complex math or timing logic.
 - **Smart Features**:
   - `float cm = integrall.readDistance(trig, echo, samples);` - Measures distance. The `samples` parameter (default 3) automatically filters out noise for a stable reading.
   - `bool near = integrall.isNear(trig, echo, threshold_cm);` - One-liner proximity alert. Returns `true` if an object is closer than the threshold.
-  - `int light = integrall.readAnalogPercent(A0);` - Returns a clean 0-100% value from any analog sensor.
+  - `int light = integrall.readLightPercent(A0);` - Read LDR light intensity.
+  - `int raw = integrall.readAnalogPercent(A0);` - Returns a clean 0-100% value from any analog sensor.
   - `bool motion = integrall.isTriggered(PIR_PIN);` - Simple true/false trigger for motion sensors.
 
 ### 4. Smart Relays
@@ -81,6 +82,32 @@ Native I2C OLED support with text, values, and progress bars.
   - `integrall.oledPrintValue("Temp: ", 24.5, 0);` - Print a labelled number value.
   - `integrall.oledBar(75);` - Draw a progress bar at 75%.
   - `integrall.oledClear();` - Clear the entire screen.
+
+### 7. Buzzer Alerts
+Supports single beeps, patterns, and ready-to-use alerts.
+- **Setup**: `#define INTEGRALL_ENABLE_BUZZER`
+- **Commands**:
+  - `integrall.enableBuzzer(pin);` - Initialize.
+  - `integrall.buzzerBeep(ms);` - Single beep.
+  - `integrall.buzzerAlert();` - Triple rapid beep for danger/alarm.
+  - `integrall.buzzerSuccess();` / `integrall.buzzerFail();` - Melodic feedback.
+
+### 8. RGB LED
+Control multi-color LEDs with named colors or RGB values.
+- **Setup**: `#define INTEGRALL_ENABLE_RGB`
+- **Commands**:
+  - `integrall.enableRGB(rPin, gPin, bPin, commonAnode);` - Initialize.
+  - `integrall.setColor("blue");` - Set by name (red, green, blue, yellow, cyan, white, purple, orange).
+  - `integrall.setRGB(r, g, b);` - Custom color balance.
+  - `integrall.rgbBlink(r, g, b, ms);` - **Non-blocking** color blink.
+
+### 9. Non-Blocking Blinker
+The ultimate replacement for the "Blink" example. No `delay()` needed.
+- **Commands**:
+  - `integrall.blink(pin, interval);` - Start blinking in the background.
+  - `integrall.stopBlink();` - Stop the blinking.
+
+**Why use this?** Traditional `delay(1000)` freezes your ESP32. With `integrall.blink()`, your LED flashes while your WiFi and sensors keep working perfectly.
 
 **Example – Sensor Dashboard:**
 ```cpp
@@ -212,10 +239,39 @@ void loop() {
 }
 ```
 
+
 ---
 
+## 🚀 The Universal IoT Foundation
+Integrall is designed to be the **"OS" for your project**. Instead of just giving you "canned" projects like a Lock or Alarm, it provides a foundation that simplifies **every** line of code you write, whether you are building a Robot, a Bluetooth device, or an AI monitor.
 
-## 🌐 IoT & Backend
+### 1. Replaces the "Millis() Headache"
+Most IoT projects break when you use `delay()`. Integrall provides non-blocking logic as a standard:
+- ❌ **Standard**: `if (millis() - pM > interval) { ... }`
+- ✅ **Integrall**: `integrall.blink(pin, interval);` or `integrall.sweepServo(pin, speed);`
+
+### 2. Standardized Cloud bridge for ANY data
+You don't need a special Integrall library for your sensor to send it to the cloud.
+```cpp
+// Works for any variable or sensor!
+StaticJsonDocument<64> data;
+data["co2"] = mySpecialSensor.read(); 
+integrall.sendTelemetry(data);
+```
+
+### 3. The Responsive Background
+Normal WiFi code makes your loop "stutter." Integrall's `handle()` runs in background "slices," ensuring your physical buttons and local logic stay lightning-fast while the network stays connected.
+
+### 4. Bridge Any Input (Bluetooth, Serial, Web)
+You can use Integrall modules to respond to any external trigger:
+```cpp
+if (Bluetooth.available()) {
+   integrall.buzzerAlert(); // One line for a complex beep pattern
+}
+```
+
+---
+
 Integrall is built for the cloud. The ESP32 automatically syncs with your server.
 
 ### Automatic Status Engine
@@ -260,7 +316,8 @@ In the `integrall.handle()` function, the framework periodically "asks" the back
 | **LCD Setup** | 5 lines (Wire, addr, init, backlight) | `integrall.begin();` |
 | **Pot to Servo** | 3 lines (`analogRead`, `map`, `write`) | `integrall.setServoFromAnalog(9, A0);` |
 | **Ultrasonic** | ~15 lines (pulsem, timing math) | `integrall.readDistance(5, 6);` |
-| **Safely Delay** | `delay(1000)` (Freezes everything) | *Use Non-blocking modules* |
+| **Blink LED** | 4 lines + `delay(1000)` (Freezes) | `integrall.blink(2, 500);` |
+| **Safely Delay** | `delay(1000)` (Freezes everything) | *Automatically Non-blocking* |
 
 ---
 

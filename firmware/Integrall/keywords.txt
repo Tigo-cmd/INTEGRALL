@@ -50,10 +50,38 @@ oledPrint	KEYWORD2
 oledPrintValue	KEYWORD2
 oledBar	KEYWORD2
 oledClear	KEYWORD2
+blink	KEYWORD2
+stopBlink	KEYWORD2
 readDistance	KEYWORD2
 readAnalogPercent	KEYWORD2
+readLightPercent	KEYWORD2
 isTriggered	KEYWORD2
 isNear	KEYWORD2
+enableBuzzer	KEYWORD2
+buzzerBeep	KEYWORD2
+buzzerPattern	KEYWORD2
+buzzerAlert	KEYWORD2
+buzzerSuccess	KEYWORD2
+buzzerFail	KEYWORD2
+buzzerOff	KEYWORD2
+enableRGB	KEYWORD2
+setRGB	KEYWORD2
+setColor	KEYWORD2
+rgbOff	KEYWORD2
+rgbBlink	KEYWORD2
+readTemperature	KEYWORD2
+readHumidity	KEYWORD2
+lockSetup	KEYWORD2
+lockUpdate	KEYWORD2
+alarmSetup	KEYWORD2
+alarmUpdate	KEYWORD2
+parkingSetup	KEYWORD2
+parkingUpdate	KEYWORD2
+weatherSetup	KEYWORD2
+weatherUpdate	KEYWORD2
+smartSwitchSetup	KEYWORD2
+smartSwitchUpdate	KEYWORD2
+enableEventLog	KEYWORD2
 
 #######################################
 # Constants (LITERAL1)

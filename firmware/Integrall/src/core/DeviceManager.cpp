@@ -278,11 +278,14 @@ bool DeviceManager::sendTelemetry(const JsonDocument& data) {
     }
     
     char url[128];
-    snprintf(url, sizeof(url), "%s/api/devices/%s/telemetry", 
-             _config.backend_url, _device_id);
+    snprintf(url, sizeof(url), "%s/api/telemetry", _config.backend_url);
     
-    char payload[512];
-    serializeJson(data, payload);
+    StaticJsonDocument<1024> doc;
+    doc["device_id"] = _device_id;
+    doc["data"] = data;
+    
+    char payload[1024];
+    serializeJson(doc, payload);
     
     _http.begin(url);
     _http.addHeader("Content-Type", "application/json");
@@ -291,7 +294,7 @@ bool DeviceManager::sendTelemetry(const JsonDocument& data) {
     int httpCode = _http.POST(payload);
     _http.end();
     
-    return (httpCode == 200);
+    return (httpCode == 200 || httpCode == 201);
 }
 
 bool DeviceManager::sendCommandResponse(const char* command_id, bool success, const char* message) {
@@ -300,8 +303,7 @@ bool DeviceManager::sendCommandResponse(const char* command_id, bool success, co
     }
     
     char url[128];
-    snprintf(url, sizeof(url), "%s/api/devices/%s/commands/%s/response", 
-             _config.backend_url, _device_id, command_id);
+    snprintf(url, sizeof(url), "%s/api/commands/%s/response", _config.backend_url, command_id);
     
     StaticJsonDocument<256> doc;
     doc["success"] = success;
@@ -319,7 +321,7 @@ bool DeviceManager::sendCommandResponse(const char* command_id, bool success, co
     int httpCode = _http.POST(payload);
     _http.end();
     
-    return (httpCode == 200);
+    return (httpCode == 200 || httpCode == 201);
 }
 
 bool DeviceManager::startConfigPortal(const char* ap_name, const char* ap_password) {

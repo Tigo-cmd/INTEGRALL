@@ -38,6 +38,16 @@ public:
     }
 
     /**
+     * Read LDR Light intensity (0-100% scale)
+     * @param pin           Analog pin
+     * @param reverseScale  Set to true if 0 = Bright (common with pull-up LDRs)
+     */
+    int readLightPercent(uint8_t pin, bool reverseScale = false) {
+        int p = readAnalogPercent(pin);
+        return reverseScale ? (100 - p) : p;
+    }
+
+    /**
      * Get distance from HC-SR04 Ultrasonic Sensor (in CM)
      * Includes basic noise filtering (averaging).
      */

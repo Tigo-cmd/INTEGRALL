@@ -19,10 +19,11 @@ Integrall abstracts complex IoT development into a simple, unified experience:
 
 ### Firmware (ESP32/Arduino)
 - ✅ **Zero-config WiFi** - Auto-connect with persistent credentials
-- ✅ **Plug-and-play modules** - Relay, Keypad, Display (OLED/LCD)
+- ✅ **Plug-and-play modules** - Relay, Keypad, LCD/OLED, Buzzer, RGB LED, Sensors
+- ✅ **High-Level Project APIs** - Build an Alarm or Lock system in < 15 lines of code
 - ✅ **Safety-first design** - Auto-off timeouts, interlock groups, debounced inputs
-- ✅ **Event-driven architecture** - Non-blocking, responsive system
-- ✅ **Memory optimized** - Compile only what you need, lazy initialization
+- ✅ **Event-driven architecture** - Non-blocking (no `delay()`), responsive system
+- ✅ **Memory optimized** - Compile only what you need (lazy initialization)
 - ✅ **Backend integration** - Automatic registration, command polling, telemetry
 
 ### Backend (Python/FastAPI)
@@ -104,12 +105,22 @@ integrall/
 │   │   │   ├── core/
 │   │   │   │   ├── DeviceManager.h   # WiFi, backend, identity
 │   │   │   │   └── Logger.h          # Debug logging
-│   │   │   └── modules/
-│   │   │       ├── RelayModule.h     # Relay control with safety
-│   │   │       └── (Keypad, OLED coming in v0.2)
+│   │   │   ├── modules/
+│   │   │   │   ├── RelayModule.h     # Relay control with safety
+│   │   │   │   ├── SensorModule.h    # DHT, Ultrasonic, Analog
+│   │   │   │   ├── KeypadModule.h    # 4x4 matrix support
+│   │   │   │   ├── LCDModule.h       # I2C 16x2 / 20x4
+│   │   │   │   ├── OLEDModule.h      # SSD1306 (128x64)
+│   │   │   │   ├── BuzzerModule.h    # Audible alerts/melodies
+│   │   │   │   ├── RGBModule.h       # Multi-color LED control
+│   │   │   │   └── BlinkerModule.h   # Non-blocking LED flashing
 │   │   └── examples/
 │   │       ├── BasicRelay/           # Simple relay control
-│   │       └── FullDemo/             # All features
+│   │       ├── KeypadLock/           # Secure PIN door system
+│   │       ├── AlarmSystem/          # PIR-based security
+│   │       ├── WeatherStation/       # DHT IoT node
+│   │       ├── ParkingSensor/        # Proximity assistance
+│   │       └── BlinkNonBlocking/     # Efficient LED control
 │   └── platformio.ini       # PlatformIO configuration
 │
 ├── backend/                 # Python FastAPI backend
@@ -176,15 +187,26 @@ doc["humidity"] = 60;
 integrall.sendTelemetry(doc);
 ```
 
+### High-Level Projects (The Integrall Way)
+```cpp
+// A complete 4-digit PIN lock system in setup() + loop()
+integrall.lockSetup("1234", door_relay_id); 
+void loop() { integrall.lockUpdate(); integrall.handle(); }
+```
+
 ## 🔧 Configuration
 
 ### Firmware (Compile-time)
 ```cpp
 // In your sketch, BEFORE including Integrall.h:
 #define INTEGRALL_ENABLE_RELAY      // Enable relay module
-#define INTEGRALL_ENABLE_KEYPAD     // Enable keypad module (v0.2)
-#define INTEGRALL_ENABLE_OLED       // Enable OLED display (v0.2)
-#define INTEGRALL_DEBUG_LEVEL 2     // 0=none, 1=errors, 2=warn, 3=info, 4=verbose
+#define INTEGRALL_ENABLE_KEYPAD     // Enable keypad module
+#define INTEGRALL_ENABLE_LCD        // Enable LCD display
+#define INTEGRALL_ENABLE_OLED       // Enable OLED display
+#define INTEGRALL_ENABLE_SENSORS    // Enable DHT/Ultrasonic/Analog
+#define INTEGRALL_ENABLE_BUZZER     // Enable sound alerts
+#define INTEGRALL_ENABLE_RGB        // Enable multi-color LED
+#define INTEGRALL_DEBUG_LEVEL 2     // 0=none, 1=errors...
 
 #include <Integrall.h>
 ```
@@ -258,22 +280,18 @@ Integrall includes multiple safety mechanisms:
 
 ## 📈 Roadmap
 
-### v0.1 (Current)
-- ✅ ESP32 WiFi + HTTP backend
-- ✅ Relay module with safety features
-- ✅ FastAPI backend with SQLite
-- ✅ Device registration and command polling
-
-### v0.2 (Next)
-- 🔄 Keypad module (3x4, 4x4 matrix)
-- 🔄 OLED/LCD display modules
-- 🔄 MQTT support (optional)
+### v0.2 (In Progress - 90% Complete)
+- ✅ **Keypad module** (3x4, 4x4 matrix)
+- ✅ **OLED/LCD display modules**
+- ✅ **DHT & Ultrasonic sensors**
+- ✅ **High-level project APIs** (Lock, Alarm, etc.)
+- ✅ **Non-blocking core** (delay-free architecture)
 - 🔄 WebSocket real-time push
 - 🔄 OTA firmware updates
 
 ### v0.3
 - 🔄 ESP8266 support
-- 🔄 Additional sensors (DHT, BME280)
+- 🔄 MQTT support (optional)
 - 🔄 Voice integration hooks
 - 🔄 Modular library packages
 
