@@ -30,21 +30,39 @@ public:
 
     /**
      * Get distance from HC-SR04 Ultrasonic Sensor (in CM)
+     * Includes basic noise filtering (averaging).
      */
-    float readDistanceCM(uint8_t trigPin, uint8_t echoPin) {
-        pinMode(trigPin, OUTPUT);
-        pinMode(echoPin, INPUT);
+    float readDistanceCM(uint8_t trigPin, uint8_t echoPin, uint8_t samples = 3) {
+        float total = 0;
+        uint8_t validSamples = 0;
+
+        for (uint8_t i = 0; i < samples; i++) {
+            pinMode(trigPin, OUTPUT);
+            pinMode(echoPin, INPUT);
+            
+            digitalWrite(trigPin, LOW);
+            delayMicroseconds(2);
+            digitalWrite(trigPin, HIGH);
+            delayMicroseconds(10);
+            digitalWrite(trigPin, LOW);
+            
+            long duration = pulseIn(echoPin, HIGH, 25000); // 25ms = ~4 meters
+            if (duration > 0) {
+                total += (duration * 0.034 / 2);
+                validSamples++;
+            }
+            if (samples > 1) delay(10); // Short gap between bursts
+        }
         
-        digitalWrite(trigPin, LOW);
-        delayMicroseconds(2);
-        digitalWrite(trigPin, HIGH);
-        delayMicroseconds(10);
-        digitalWrite(trigPin, LOW);
-        
-        long duration = pulseIn(echoPin, HIGH, 30000); // 30ms timeout
-        if (duration == 0) return -1; // Out of range
-        
-        return duration * 0.034 / 2;
+        return (validSamples > 0) ? (total / validSamples) : -1.0f;
+    }
+
+    /**
+     * Check if an object is within a specific range (Smart Alert)
+     */
+    bool isWithinRange(uint8_t trig, uint8_t echo, float minCM, float maxCM) {
+        float d = readDistanceCM(trig, echo, 1);
+        return (d >= minCM && d <= maxCM);
     }
 
     /**

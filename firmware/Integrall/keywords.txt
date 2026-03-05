@@ -37,6 +37,23 @@ getWiFiStrength	KEYWORD2
 getStatusString	KEYWORD2
 reconnect	KEYWORD2
 sendTelemetry	KEYWORD2
+setServo	KEYWORD2
+setServoFromAnalog	KEYWORD2
+sweepServo	KEYWORD2
+enableKeypad	KEYWORD2
+keypadGetKey	KEYWORD2
+keypadCapture	KEYWORD2
+keypadSubmitted	KEYWORD2
+keypadCheckPin	KEYWORD2
+keypadClear	KEYWORD2
+oledPrint	KEYWORD2
+oledPrintValue	KEYWORD2
+oledBar	KEYWORD2
+oledClear	KEYWORD2
+readDistance	KEYWORD2
+readAnalogPercent	KEYWORD2
+isTriggered	KEYWORD2
+isNear	KEYWORD2
 
 #######################################
 # Constants (LITERAL1)

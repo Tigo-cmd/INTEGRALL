@@ -73,6 +73,14 @@
 #include "modules/ServoModule.h"
 #endif
 
+#if INTEGRALL_MODULE_KEYPAD_ENABLED
+#include "modules/KeypadModule.h"
+#endif
+
+#if INTEGRALL_MODULE_OLED_ENABLED
+#include "modules/OLEDModule.h"
+#endif
+
 // ============================================================================
 // MAIN SYSTEM CLASS
 // ============================================================================
@@ -207,10 +215,21 @@ public:
     #if INTEGRALL_MODULE_SENSORS_ENABLED
     
     /**
-     * Read distance in CM using Ultrasonic (HC-SR04)
+     * Read distance in CM with noise filtering
+     * @param trig Trigger pin
+     * @param echo Echo pin
+     * @param samples Number of readings to average (default: 3)
      */
-    float readDistance(uint8_t trig, uint8_t echo) {
-        return _sensor_module.readDistanceCM(trig, echo);
+    float readDistance(uint8_t trig, uint8_t echo, uint8_t samples = 3) {
+        return _sensor_module.readDistanceCM(trig, echo, samples);
+    }
+    
+    /**
+     * Easy proximity alert
+     * Returns true if object is closer than threshold
+     */
+    bool isNear(uint8_t trig, uint8_t echo, float threshold_cm) {
+        return _sensor_module.isWithinRange(trig, echo, 0, threshold_cm);
     }
     
     /**
@@ -261,9 +280,204 @@ public:
     }
     
     #endif // INTEGRALL_MODULE_SERVO_ENABLED
-    
+
     // ========================================================================
-    // SYSTEM STATUS API
+    // KEYPAD MODULE API (available if INTEGRALL_ENABLE_KEYPAD is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_KEYPAD_ENABLED
+
+    /**
+     * Initialize keypad with row and column GPIO pins
+     * @param rowPins Array of row pins
+     * @param colPins Array of column pins
+     * @param rows    Number of rows (default 4)
+     * @param cols    Number of columns (default 4)
+     */
+    bool enableKeypad(byte* rowPins, byte* colPins, byte rows = 4, byte cols = 4) {
+        return _keypad_module.begin(rowPins, colPins, rows, cols);
+    }
+
+    /**
+     * Get the key currently pressed ('\0' if none)
+     */
+    char keypadGetKey() {
+        return _keypad_module.getKey();
+    }
+
+    /**
+     * Accumulate keypresses into a string buffer.
+     * '#' submits, '*' is backspace.
+     */
+    const char* keypadCapture(uint8_t maxLen = 8) {
+        return _keypad_module.captureString(maxLen);
+    }
+
+    /**
+     * Returns true when '#' is pressed and buffer has content
+     */
+    bool keypadSubmitted() {
+        return _keypad_module.isSubmitted();
+    }
+
+    /**
+     * Compare buffered input to a PIN/password
+     */
+    bool keypadCheckPin(const char* pin) {
+        bool ok = _keypad_module.checkPin(pin);
+        _keypad_module.clearBuffer();
+        return ok;
+    }
+
+    /**
+     * Clear the keypad input buffer
+     */
+    void keypadClear() {
+        _keypad_module.clearBuffer();
+    }
+
+    #endif // INTEGRALL_MODULE_KEYPAD_ENABLED
+
+    // ========================================================================
+    // HIGH-LEVEL LOCK SYSTEM
+    // Requires INTEGRALL_ENABLE_KEYPAD + INTEGRALL_ENABLE_RELAY
+    // Optionally uses INTEGRALL_ENABLE_LCD for feedback
+    // ========================================================================
+    #if INTEGRALL_MODULE_KEYPAD_ENABLED && INTEGRALL_MODULE_RELAY_ENABLED
+
+    /**
+     * Configure the lock system in one call.
+     * @param pin         The secret PIN/password to check against
+     * @param relayIndex  The relay index returned by enableRelay()
+     * @param unlockMs    How long to keep the relay on (ms), default 5s
+     * @param maxRetries  Lock out after N wrong attempts (0 = unlimited)
+     */
+    void lockSetup(const char* pin, int relayIndex,
+                   uint32_t unlockMs = 5000, uint8_t maxRetries = 3) {
+        strncpy(_lock_pin, pin, sizeof(_lock_pin) - 1);
+        _lock_relay      = relayIndex;
+        _lock_unlock_ms  = unlockMs;
+        _lock_max_tries  = maxRetries;
+        _lock_tries      = 0;
+        _lock_locked_out = false;
+        _lock_active     = true;
+        relaySetTimeout(relayIndex, unlockMs);
+        _lockShowIdle();
+    }
+
+    /**
+     * Call this in loop() to run the entire lock system.
+     * Handles: key capture, asterisk display, PIN check,
+     *          LCD feedback, relay control, and lockout logic.
+     */
+    void lockUpdate() {
+        if (!_lock_active) return;
+
+        if (_lock_locked_out) {
+            // Stay locked out — do nothing until reset
+            return;
+        }
+
+        // Capture keypresses and show asterisk feedback on LCD
+        const char* input = _keypad_module.captureString(8);
+
+        #if INTEGRALL_MODULE_LCD_ENABLED
+        // Show asterisks on row 1, padded with spaces
+        char stars[17];
+        uint8_t len = strlen(input);
+        for (uint8_t i = 0; i < 16; i++)
+            stars[i] = (i < len) ? '*' : ' ';
+        stars[16] = '\0';
+        _lcd_module.print(stars, 0, 1);
+        #endif
+
+        // When '#' is pressed, evaluate the PIN
+        if (_keypad_module.isSubmitted()) {
+            if (_keypad_module.checkPin(_lock_pin)) {
+                // ✅ Correct PIN
+                _lock_tries = 0;
+                #if INTEGRALL_MODULE_LCD_ENABLED
+                _lcd_module.print("  ** UNLOCKED **", 0, 0);
+                _lcd_module.print("   Welcome!     ", 0, 1);
+                #endif
+                relayOn(_lock_relay);
+                delay(_lock_unlock_ms);
+                _lockShowIdle();
+            } else {
+                // ❌ Wrong PIN
+                _lock_tries++;
+                if (_lock_max_tries > 0 && _lock_tries >= _lock_max_tries) {
+                    // Lockout activated
+                    _lock_locked_out = true;
+                    #if INTEGRALL_MODULE_LCD_ENABLED
+                    _lcd_module.print(" !! LOCKED OUT !", 0, 0);
+                    _lcd_module.print("  Call Admin    ", 0, 1);
+                    #endif
+                } else {
+                    #if INTEGRALL_MODULE_LCD_ENABLED
+                    char msg[17];
+                    snprintf(msg, sizeof(msg), " Wrong! (%d left)",
+                             _lock_max_tries - _lock_tries);
+                    _lcd_module.print("  !! DENIED !!  ", 0, 0);
+                    _lcd_module.print(msg, 0, 1);
+                    #endif
+                    delay(2000);
+                    _lockShowIdle();
+                }
+            }
+            _keypad_module.clearBuffer();
+        }
+    }
+
+    /**
+     * Reset a lockout (e.g., called from a master PIN or admin button)
+     */
+    void lockReset() {
+        _lock_tries      = 0;
+        _lock_locked_out = false;
+        _lockShowIdle();
+    }
+
+    #endif // INTEGRALL_MODULE_KEYPAD_ENABLED && INTEGRALL_MODULE_RELAY_ENABLED
+
+    // ========================================================================
+    // OLED MODULE API (available if INTEGRALL_ENABLE_OLED is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_OLED_ENABLED
+
+    /**
+     * Print text to the OLED screen
+     * @param text  Text to display
+     * @param col   Character column (0-indexed)
+     * @param row   Character row (0-indexed)
+     * @param clear Clear screen before printing
+     */
+    void oledPrint(const char* text, uint8_t col = 0, uint8_t row = 0, bool clear = false) {
+        _oled_module.print(text, col, row, clear);
+    }
+
+    /**
+     * Print a labeled value (e.g., "Temp: 24.5")
+     */
+    void oledPrintValue(const char* label, float value, uint8_t row = 0) {
+        _oled_module.printValue(label, value, row);
+    }
+
+    /**
+     * Draw a progress bar (0-100%)
+     */
+    void oledBar(uint8_t percent) {
+        _oled_module.drawBar(percent);
+    }
+
+    /**
+     * Clear the OLED screen
+     */
+    void oledClear() {
+        _oled_module.clear();
+    }
+
+    #endif // INTEGRALL_MODULE_OLED_ENABLED
+
     // ========================================================================
     
     /**
@@ -328,7 +542,33 @@ private:
     #if INTEGRALL_MODULE_SERVO_ENABLED
     ServoModule _servo_module;
     #endif
-    
+
+    #if INTEGRALL_MODULE_KEYPAD_ENABLED
+    KeypadModule _keypad_module;
+    #endif
+
+    #if INTEGRALL_MODULE_OLED_ENABLED
+    OLEDModule _oled_module;
+    #endif
+
+    // Lock system state
+    #if INTEGRALL_MODULE_KEYPAD_ENABLED && INTEGRALL_MODULE_RELAY_ENABLED
+    bool     _lock_active     = false;
+    bool     _lock_locked_out = false;
+    int      _lock_relay      = 0;
+    uint32_t _lock_unlock_ms  = 5000;
+    uint8_t  _lock_max_tries  = 3;
+    uint8_t  _lock_tries      = 0;
+    char     _lock_pin[17]    = "";
+
+    void _lockShowIdle() {
+        #if INTEGRALL_MODULE_LCD_ENABLED
+        _lcd_module.print("  === LOCK ===  ", 0, 0);
+        _lcd_module.print("  Enter PIN:   ", 0, 1);
+        #endif
+    }
+    #endif
+
     void _handleModules();
     void _dispatchCommand(const char* command_type, const JsonObject& params);
 };
