@@ -1,9 +1,8 @@
 /**
  * BuzzerModule.h
  *
- * Simple buzzer control for Integrall Framework.
- * Supports single beeps, multi-pattern beeps, and custom tones.
- * Works on both ESP32 (LEDC) and standard Arduino (tone()).
+ * Professional non-blocking buzzer control for Integrall Framework.
+ * Replaces delay() with a state machine for patterns and tones.
  */
 
 #ifndef INTEGRALL_BUZZER_MODULE_H
@@ -19,7 +18,9 @@ namespace Integrall {
 
 class BuzzerModule {
 public:
-    BuzzerModule() : _pin(255), _initialized(false) {}
+    BuzzerModule() : _pin(255), _initialized(false), _pattern_active(false), 
+                     _pattern_count(0), _on_ms(0), _off_ms(0), _last_ms(0), 
+                     _in_on_phase(false), _freq(2000), _is_success(false) {}
 
     bool begin(uint8_t pin) {
         _pin = pin;
@@ -30,70 +31,93 @@ public:
     }
 
     /**
-     * Single beep for a duration
+     * Start a non-blocking beep pattern
      */
-    void beep(uint32_t durationMs = 200) {
+    void pattern(uint8_t times, uint32_t onMs = 150, uint32_t offMs = 100, uint16_t freq = 2000) {
         if (!_initialized) return;
-#if defined(ESP32)
-        tone(_pin, 2000, durationMs);
-#else
-        tone(_pin, 2000, durationMs);
-#endif
-        delay(durationMs + 10);
+        _is_success = false;
+        _pattern_count = times;
+        _on_ms = onMs;
+        _off_ms = offMs;
+        _freq = freq;
+        _pattern_active = true;
+        _last_ms = millis();
+        _in_on_phase = true;
+        tone(_pin, _freq);
     }
 
     /**
-     * Beep N times with configurable on/off timing
+     * Play a specific frequency for a duration
      */
-    void pattern(uint8_t times, uint32_t onMs = 150, uint32_t offMs = 100) {
-        if (!_initialized) return;
-        for (uint8_t i = 0; i < times; i++) {
-            tone(_pin, 2000, onMs);
-            delay(onMs + offMs);
+    void customTone(uint16_t freq, uint32_t durationMs) {
+        pattern(1, durationMs, 0, freq);
+    }
+
+    void alert()   { if(!_pattern_active) pattern(3, 100, 80, 2500); }
+    
+    /**
+     * Re-implemented descending/ascending success tone without blocking!
+     */
+    void success() { 
+        if(!_pattern_active) {
+            _is_success = true;
+            pattern(2, 100, 50, 1500); // Start with 1500Hz
         }
     }
 
-    /**
-     * Beep at a specific frequency
-     */
-    void customTone(uint16_t freq, uint32_t durationMs) {
-        if (!_initialized) return;
-        tone(_pin, freq, durationMs);
-        delay(durationMs + 10);
-    }
-
-    /**
-     * Alert pattern: 3 rapid beeps (alarm/danger)
-     */
-    void alert() { pattern(3, 100, 80); }
-
-    /**
-     * Success pattern: 2 ascending beeps
-     */
-    void success() {
-        if (!_initialized) return;
-        tone(_pin, 1500, 100); delay(150);
-        tone(_pin, 2500, 150); delay(200);
-    }
-
-    /**
-     * Failure pattern: 1 long low beep
-     */
-    void failure() {
-        if (!_initialized) return;
-        tone(_pin, 800, 500);
-        delay(550);
-    }
+    void failure() { if(!_pattern_active) pattern(1, 500, 0, 800); }
+    void beep(uint32_t ms = 150) { if(!_pattern_active) pattern(1, ms, 0, 2000); }
 
     void off() {
-        if (!_initialized) return;
-        noTone(_pin);
-        digitalWrite(_pin, LOW);
+        _pattern_active = false;
+        if (_initialized) noTone(_pin);
     }
 
+    /**
+     * Call in loop() to process patterns
+     */
+    void handle() {
+        if (!_pattern_active || !_initialized) return;
+
+        unsigned long now = millis();
+        if (_in_on_phase) {
+            if (now - _last_ms >= _on_ms) {
+                noTone(_pin);
+                _in_on_phase = false;
+                _last_ms = now;
+                if (_pattern_count > 0) _pattern_count--;
+                if (_pattern_count == 0) {
+                    _pattern_active = false;
+                    _is_success = false;
+                }
+            }
+        } else if (_pattern_count > 0) {
+            if (now - _last_ms >= _off_ms) {
+                // Feature: Handle frequency jump for melodic tones (Success)
+                if (_is_success && _pattern_count == 1) {
+                    _freq = 2500; // Jump to high tone for the second beep
+                }
+
+                tone(_pin, _freq);
+                _in_on_phase = true;
+                _last_ms = now;
+            }
+        }
+    }
+
+    bool isActive() const { return _pattern_active; }
+
 private:
-    uint8_t _pin;
-    bool    _initialized;
+    uint8_t  _pin;
+    bool     _initialized;
+    bool     _pattern_active;
+    uint8_t  _pattern_count;
+    uint16_t _freq;
+    uint32_t _on_ms;
+    uint32_t _off_ms;
+    unsigned long _last_ms;
+    bool     _in_on_phase;
+    bool     _is_success; // Flag to indicate a multi-tone sequence
 };
 
 } // namespace Integrall

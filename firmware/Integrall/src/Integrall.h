@@ -151,6 +151,23 @@ public:
      * @param relay_index Index returned by enableRelay()
      */
     void relayToggle(int relay_index);
+
+    /**
+     * Set relay state directly
+     * @param relay_index The index returned by enableRelay
+     * @param on          True for ON, False for OFF
+     * @param alert       If true, plays the alert pattern when ON
+     */
+    void setRelay(int relay_index, bool on, bool alert = false) {
+        if (on) {
+            relayOn(relay_index);
+            #if INTEGRALL_MODULE_BUZZER_ENABLED
+            if (alert) buzzerAlert();
+            #endif
+        } else {
+            relayOff(relay_index);
+        }
+    }
     
     /**
      * Set relay safety timeout (auto-off after duration)
@@ -995,6 +1012,10 @@ void System::_handleModules() {
     _relay_module.handle();
     #endif
     
+    #if INTEGRALL_MODULE_BUZZER_ENABLED
+    _buzzer_module.handle();
+    #endif
+
     _blinker.handle();
 }
 
