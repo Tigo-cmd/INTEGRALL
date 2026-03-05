@@ -14,6 +14,15 @@
 
 #include <Arduino.h>
 
+// Optional: include DHT support if user has the library installed
+// Install via Library Manager: "DHT sensor library" by Adafruit
+#if __has_include(<DHT.h>)
+  #include <DHT.h>
+  #define INTEGRALL_DHT_AVAILABLE 1
+#else
+  #define INTEGRALL_DHT_AVAILABLE 0
+#endif
+
 namespace Integrall {
 
 class SensorModule {
@@ -73,6 +82,33 @@ public:
         bool state = digitalRead(pin);
         return activeHigh ? state : !state;
     }
+
+#if INTEGRALL_DHT_AVAILABLE
+    /**
+     * Read temperature from DHT11/DHT22 sensor
+     * @param pin     Data pin
+     * @param type    DHT11, DHT22, or DHT21
+     * @param celsius true = Celsius, false = Fahrenheit
+     */
+    float readTemperature(uint8_t pin, uint8_t type = DHT22, bool celsius = true) {
+        DHT dht(pin, type);
+        dht.begin();
+        delay(250); // DHT needs settle time
+        float t = celsius ? dht.readTemperature() : dht.readTemperature(true);
+        return isnan(t) ? -999.0f : t;
+    }
+
+    /**
+     * Read humidity from DHT11/DHT22 sensor (returns 0-100%)
+     */
+    float readHumidity(uint8_t pin, uint8_t type = DHT22) {
+        DHT dht(pin, type);
+        dht.begin();
+        delay(250);
+        float h = dht.readHumidity();
+        return isnan(h) ? -1.0f : h;
+    }
+#endif
 };
 
 } // namespace Integrall

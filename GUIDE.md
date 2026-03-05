@@ -145,9 +145,75 @@ void loop() {
 }
 ```
 
-> **Tip**: To reset a lockout from code, call `integrall.lockReset();`
+
+### 🚨 Alarm System
+A professional security system with PIR motion detection, cooldown safety, and sound/light alerts.
+- **Requires**: `INTEGRALL_ENABLE_SENSORS` + `INTEGRALL_ENABLE_RELAY`
+```cpp
+void setup() {
+    integrall.begin();
+    int siren = integrall.enableRelay(13, true, "Siren");
+    // setupAlarm(pirPin, relayIndex, cooldownMs)
+    integrall.alarmSetup(19, siren, 10000); 
+}
+
+void loop() {
+    integrall.alarmUpdate(); // Automatically manages detection & triggers
+    integrall.handle();
+}
+```
+
+### 🚗 Parking Sensor
+Visual and audible distance assistance for garages or robots.
+- **Requires**: `INTEGRALL_ENABLE_SENSORS` + `INTEGRALL_ENABLE_LCD` (or OLED)
+```cpp
+void setup() {
+    integrall.begin();
+    // parkingSetup(trigPin, echoPin, warningCM, stopCM)
+    integrall.parkingSetup(2, 0, 50.0, 15.0);
+}
+
+void loop() {
+    integrall.parkingUpdate(); // Automatically displays distance and status
+    integrall.handle();
+}
+```
+
+### 🌡️ Weather Station
+Monitors temperature and humidity with automatic LCD updates and IoT logging.
+- **Requires**: `INTEGRALL_ENABLE_SENSORS` (with DHT library)
+```cpp
+void setup() {
+    integrall.begin();
+    // weatherSetup(dhtPin, dhtType, intervalSeconds)
+    integrall.weatherSetup(4, 22, 30); 
+}
+
+void loop() {
+    integrall.weatherUpdate(); // Reads on interval, updates LCD, sends to cloud
+    integrall.handle();
+}
+```
+
+### 💡 Smart Switch
+Motion-activated lighting with automatic timeout.
+- **Requires**: `INTEGRALL_ENABLE_RELAY` + `INTEGRALL_ENABLE_SENSORS`
+```cpp
+void setup() {
+    integrall.begin();
+    int light = integrall.enableRelay(13, true, "Light");
+    // smartSwitchSetup(relayIndex, pirPin, autoOffSeconds)
+    integrall.smartSwitchSetup(light, 19, 60); 
+}
+
+void loop() {
+    integrall.smartSwitchUpdate(); // Auto-on with motion, auto-off after 60s
+    integrall.handle();
+}
+```
 
 ---
+
 
 ## 🌐 IoT & Backend
 Integrall is built for the cloud. The ESP32 automatically syncs with your server.

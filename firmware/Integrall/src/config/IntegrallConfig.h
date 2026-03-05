@@ -57,6 +57,20 @@
   #define INTEGRALL_MODULE_KEYPAD_ENABLED 0
 #endif
 
+// Buzzer Module
+#ifdef INTEGRALL_ENABLE_BUZZER
+  #define INTEGRALL_MODULE_BUZZER_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_BUZZER_ENABLED 0
+#endif
+
+// RGB LED Module
+#ifdef INTEGRALL_ENABLE_RGB
+  #define INTEGRALL_MODULE_RGB_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_RGB_ENABLED 0
+#endif
+
 // ============================================================================
 // MORE COMPLEX SYSTEM CONFIGURATION
 // ============================================================================

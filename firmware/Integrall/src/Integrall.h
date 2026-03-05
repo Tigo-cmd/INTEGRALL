@@ -81,6 +81,14 @@
 #include "modules/OLEDModule.h"
 #endif
 
+#if INTEGRALL_MODULE_BUZZER_ENABLED
+#include "modules/BuzzerModule.h"
+#endif
+
+#if INTEGRALL_MODULE_RGB_ENABLED
+#include "modules/RGBModule.h"
+#endif
+
 // ============================================================================
 // MAIN SYSTEM CLASS
 // ============================================================================
@@ -399,12 +407,14 @@ public:
                 _lcd_module.print("  ** UNLOCKED **", 0, 0);
                 _lcd_module.print("   Welcome!     ", 0, 1);
                 #endif
+                _logEvent("lock", "unlocked");
                 relayOn(_lock_relay);
                 delay(_lock_unlock_ms);
                 _lockShowIdle();
             } else {
                 // ❌ Wrong PIN
                 _lock_tries++;
+                _logEvent("lock", "denied");
                 if (_lock_max_tries > 0 && _lock_tries >= _lock_max_tries) {
                     // Lockout activated
                     _lock_locked_out = true;
@@ -479,6 +489,246 @@ public:
     #endif // INTEGRALL_MODULE_OLED_ENABLED
 
     // ========================================================================
+    // BUZZER MODULE API (available if INTEGRALL_ENABLE_BUZZER is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_BUZZER_ENABLED
+
+    bool enableBuzzer(uint8_t pin) { return _buzzer_module.begin(pin); }
+    void buzzerBeep(uint32_t ms = 200)                          { _buzzer_module.beep(ms); }
+    void buzzerPattern(uint8_t n, uint32_t on = 150, uint32_t off = 100) { _buzzer_module.pattern(n, on, off); }
+    void buzzerAlert()   { _buzzer_module.alert(); }
+    void buzzerSuccess() { _buzzer_module.success(); }
+    void buzzerFail()    { _buzzer_module.failure(); }
+    void buzzerOff()     { _buzzer_module.off(); }
+
+    #endif // INTEGRALL_MODULE_BUZZER_ENABLED
+
+    // ========================================================================
+    // RGB LED API (available if INTEGRALL_ENABLE_RGB is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_RGB_ENABLED
+
+    bool enableRGB(uint8_t r, uint8_t g, uint8_t b, bool commonAnode = false) {
+        return _rgb_module.begin(r, g, b, commonAnode);
+    }
+    void setRGB(uint8_t r, uint8_t g, uint8_t b) { _rgb_module.set(r, g, b); }
+    void setColor(const char* name)               { _rgb_module.setColor(name); }
+    void rgbOff()                                 { _rgb_module.off(); }
+    void rgbBlink(uint8_t r, uint8_t g, uint8_t b, uint32_t ms = 500) {
+        _rgb_module.updateBlink(r, g, b, ms);
+    }
+
+    #endif // INTEGRALL_MODULE_RGB_ENABLED
+
+    // ========================================================================
+    // SENSOR EXTRAS: DHT Temperature & Humidity
+    // ========================================================================
+    #if INTEGRALL_MODULE_SENSORS_ENABLED
+    #if INTEGRALL_DHT_AVAILABLE
+
+    float readTemperature(uint8_t pin, uint8_t type = 22) {
+        return _sensor_module.readTemperature(pin, type);
+    }
+    float readHumidity(uint8_t pin, uint8_t type = 22) {
+        return _sensor_module.readHumidity(pin, type);
+    }
+
+    #endif // INTEGRALL_DHT_AVAILABLE
+    #endif // INTEGRALL_MODULE_SENSORS_ENABLED
+
+    // ========================================================================
+    // PROJECT-LEVEL API: ALARM SYSTEM
+    // Requires: SENSORS + RELAY + optionally BUZZER + LCD/OLED
+    // ========================================================================
+    #if INTEGRALL_MODULE_SENSORS_ENABLED && INTEGRALL_MODULE_RELAY_ENABLED
+
+    /**
+     * Configure a motion-triggered alarm system.
+     * @param pirPin      PIR sensor GPIO pin
+     * @param relayIndex  Relay to trigger (e.g., siren, light)
+     * @param cooldownMs  Minimum time between alarm triggers (ms)
+     */
+    void alarmSetup(uint8_t pirPin, int relayIndex, uint32_t cooldownMs = 10000) {
+        _alarm_pir         = pirPin;
+        _alarm_relay       = relayIndex;
+        _alarm_cooldown    = cooldownMs;
+        _alarm_last_trig   = 0;
+        _alarm_active      = true;
+        pinMode(pirPin, INPUT);
+        #if INTEGRALL_MODULE_LCD_ENABLED
+        _lcd_module.print(" == ALARM SYS ==", 0, 0);
+        _lcd_module.print("   Monitoring   ", 0, 1);
+        #endif
+    }
+
+    /**
+     * Call in loop() - detects motion, triggers alarm, shows feedback.
+     */
+    void alarmUpdate() {
+        if (!_alarm_active) return;
+        bool motion = _sensor_module.isTriggered(_alarm_pir);
+        unsigned long now = millis();
+        if (motion && (now - _alarm_last_trig > _alarm_cooldown)) {
+            _alarm_last_trig = now;
+            relayOn(_alarm_relay);
+            relaySetTimeout(_alarm_relay, 5000);
+            #if INTEGRALL_MODULE_LCD_ENABLED
+            _lcd_module.print(" !! INTRUDER !! ", 0, 0);
+            _lcd_module.print("  ALARM ON!     ", 0, 1);
+            #endif
+            #if INTEGRALL_MODULE_BUZZER_ENABLED
+            _buzzer_module.alert();
+            #endif
+            _logEvent("alarm", "motion_detected");
+        }
+    }
+
+    #endif // ALARM SYSTEM
+
+    // ========================================================================
+    // PROJECT-LEVEL API: PARKING SENSOR
+    // Requires: SENSORS + optionally LCD/OLED + BUZZER
+    // ========================================================================
+    #if INTEGRALL_MODULE_SENSORS_ENABLED
+
+    /**
+     * Configure a parking / proximity display system.
+     * @param trigPin    HC-SR04 trigger pin
+     * @param echoPin    HC-SR04 echo pin
+     * @param warnCM     Distance at which to warn (yellow)
+     * @param stopCM     Distance at which to show STOP (red), 0=no stop
+     */
+    void parkingSetup(uint8_t trigPin, uint8_t echoPin,
+                      float warnCM = 50.0f, float stopCM = 20.0f) {
+        _park_trig  = trigPin;
+        _park_echo  = echoPin;
+        _park_warn  = warnCM;
+        _park_stop  = stopCM;
+        _park_active = true;
+        #if INTEGRALL_MODULE_LCD_ENABLED
+        _lcd_module.print(" PARKING SENSOR ", 0, 0);
+        _lcd_module.print("   Ready...     ", 0, 1);
+        #endif
+    }
+
+    /**
+     * Call in loop() - reads distance and shows status on LCD / buzzer.
+     */
+    void parkingUpdate() {
+        if (!_park_active) return;
+        float d = _sensor_module.readDistanceCM(_park_trig, _park_echo, 2);
+        if (d < 0) return;
+        #if INTEGRALL_MODULE_LCD_ENABLED
+        char buf[17];
+        snprintf(buf, sizeof(buf), " Dist: %.1f cm   ", d);
+        _lcd_module.print(buf, 0, 0);
+        if (_park_stop > 0 && d <= _park_stop) {
+            _lcd_module.print("  !! STOP !!    ", 0, 1);
+            #if INTEGRALL_MODULE_BUZZER_ENABLED
+            _buzzer_module.beep(80);
+            #endif
+        } else if (d <= _park_warn) {
+            _lcd_module.print("  Slow down...  ", 0, 1);
+        } else {
+            _lcd_module.print("  Safe          ", 0, 1);
+        }
+        #endif
+    }
+
+    #endif // PARKING SENSOR
+
+    // ========================================================================
+    // PROJECT-LEVEL API: WEATHER STATION
+    // Requires: SENSORS (with DHT) + optionally LCD/OLED
+    // ========================================================================
+    #if INTEGRALL_MODULE_SENSORS_ENABLED && INTEGRALL_DHT_AVAILABLE
+
+    /**
+     * Configure weather display + telemetry.
+     * @param dhtPin        Data pin for DHT sensor
+     * @param dhtType       DHT11 or DHT22
+     * @param intervalSec   How often to read (seconds)
+     */
+    void weatherSetup(uint8_t dhtPin, uint8_t dhtType = 22, uint32_t intervalSec = 10) {
+        _wx_pin      = dhtPin;
+        _wx_type     = dhtType;
+        _wx_interval = intervalSec * 1000UL;
+        _wx_last     = 0;
+        _wx_active   = true;
+        #if INTEGRALL_MODULE_LCD_ENABLED
+        _lcd_module.print("  WEATHER STA.  ", 0, 0);
+        _lcd_module.print("  Loading...    ", 0, 1);
+        #endif
+    }
+
+    /**
+     * Call in loop() — reads temp/humidity on interval, displays and sends telemetry.
+     */
+    void weatherUpdate() {
+        if (!_wx_active) return;
+        unsigned long now = millis();
+        if (now - _wx_last < _wx_interval) return;
+        _wx_last = now;
+        float t = _sensor_module.readTemperature(_wx_pin, _wx_type);
+        float h = _sensor_module.readHumidity(_wx_pin, _wx_type);
+        if (t == -999.0f || h < 0) return;
+        #if INTEGRALL_MODULE_LCD_ENABLED
+        char row0[17], row1[17];
+        snprintf(row0, sizeof(row0), " Temp: %.1fC     ", t);
+        snprintf(row1, sizeof(row1), " Humi: %.0f%%     ", h);
+        _lcd_module.print(row0, 0, 0);
+        _lcd_module.print(row1, 0, 1);
+        #endif
+        // Auto-send to backend if online
+        _logEvent("weather", "ok");
+    }
+
+    #endif // WEATHER STATION
+
+    // ========================================================================
+    // PROJECT-LEVEL API: SMART SWITCH (Motion Auto-On)
+    // Requires: RELAY + SENSORS (PIR) + optional LCD/OLED
+    // ========================================================================
+    #if INTEGRALL_MODULE_RELAY_ENABLED && INTEGRALL_MODULE_SENSORS_ENABLED
+
+    /**
+     * Configure a motion-activated smart switch.
+     * @param relayIndex     Relay to control
+     * @param pirPin         PIR sensor pin
+     * @param autoOffSec     Seconds after motion stops before turning off
+     */
+    void smartSwitchSetup(int relayIndex, uint8_t pirPin, uint32_t autoOffSec = 30) {
+        _sw_relay      = relayIndex;
+        _sw_pir        = pirPin;
+        _sw_auto_off   = autoOffSec * 1000UL;
+        _sw_last_motion = 0;
+        _sw_active     = true;
+        pinMode(pirPin, INPUT);
+    }
+
+    /**
+     * Call in loop() — turns relay on with motion, off after auto-off timeout.
+     */
+    void smartSwitchUpdate() {
+        if (!_sw_active) return;
+        bool motion = _sensor_module.isTriggered(_sw_pir);
+        unsigned long now = millis();
+        if (motion) {
+            _sw_last_motion = now;
+            relayOn(_sw_relay);
+        } else if (relayIsOn(_sw_relay) &&
+                   (now - _sw_last_motion > _sw_auto_off)) {
+            relayOff(_sw_relay);
+            #if INTEGRALL_MODULE_LCD_ENABLED
+            _lcd_module.print(" Smart Switch   ", 0, 0);
+            _lcd_module.print(" Light OFF      ", 0, 1);
+            #endif
+        }
+    }
+
+    #endif // SMART SWITCH
+
+    // ========================================================================
     
     /**
      * Check if system is fully online (WiFi + backend)
@@ -520,6 +770,11 @@ public:
      * @param json_data JSON document with telemetry data
      */
     bool sendTelemetry(const JsonDocument& data);
+
+    /**
+     * Enable or disable automatic IoT event logging to backend
+     */
+    void enableEventLog(bool enabled) { _event_log_enabled = enabled; }
 
 private:
     DeviceManager _device_manager;
@@ -568,6 +823,57 @@ private:
         #endif
     }
     #endif
+
+    // Alarm System state
+    #if INTEGRALL_MODULE_SENSORS_ENABLED && INTEGRALL_MODULE_RELAY_ENABLED
+    bool          _alarm_active   = false;
+    uint8_t       _alarm_pir      = 0;
+    int           _alarm_relay    = 0;
+    uint32_t      _alarm_cooldown = 10000;
+    unsigned long _alarm_last_trig = 0;
+    #endif
+
+    // Parking Sensor state
+    #if INTEGRALL_MODULE_SENSORS_ENABLED
+    bool    _park_active = false;
+    uint8_t _park_trig   = 0;
+    uint8_t _park_echo   = 0;
+    float   _park_warn   = 50.0f;
+    float   _park_stop   = 20.0f;
+    #endif
+
+    // Weather Station state
+    #if INTEGRALL_MODULE_SENSORS_ENABLED && INTEGRALL_DHT_AVAILABLE
+    bool          _wx_active   = false;
+    uint8_t       _wx_pin      = 0;
+    uint8_t       _wx_type     = 22;
+    uint32_t      _wx_interval = 10000;
+    unsigned long _wx_last     = 0;
+    #endif
+
+    // Smart Switch state
+    #if INTEGRALL_MODULE_RELAY_ENABLED && INTEGRALL_MODULE_SENSORS_ENABLED
+    bool          _sw_active      = false;
+    int           _sw_relay       = 0;
+    uint8_t       _sw_pir         = 0;
+    uint32_t      _sw_auto_off    = 30000;
+    unsigned long _sw_last_motion = 0;
+    #endif
+
+    bool _event_log_enabled = true;
+
+    /**
+     * Internal helper to log events to backend and serial
+     */
+    void _logEvent(const char* event_type, const char* detail) {
+        INTEGRALL_LOG_INFO_VAL("Event: ", event_type);
+        if (_event_log_enabled && isOnline()) {
+            StaticJsonDocument<128> doc;
+            doc["event"] = event_type;
+            doc["detail"] = detail;
+            sendTelemetry(doc);
+        }
+    }
 
     void _handleModules();
     void _dispatchCommand(const char* command_type, const JsonObject& params);
