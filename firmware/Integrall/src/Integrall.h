@@ -34,6 +34,15 @@
 #ifndef INTEGRALL_H
 #define INTEGRALL_H
 
+/**
+ * INTEGRALL ARCHITECTURE CHECK
+ * This framework is designed for ESP32 and ESP8266, but supports 
+ * standard Arduino boards in offline-only mode.
+ */
+#if !defined(ESP32) && !defined(ESP8266)
+  #warning "Integrall: This board does not support networking. Switching to offline-only mode."
+#endif
+
 // ============================================================================
 // USER CONFIGURATION SECTION
 // Users define flags here or in their sketch BEFORE including this header
@@ -89,6 +98,10 @@
 #include "modules/RGBModule.h"
 #endif
 
+#if INTEGRALL_MODULE_CAMERA_ENABLED
+#include "modules/CameraModule.h"
+#endif
+
 #include "modules/BlinkerModule.h"
 
 // ============================================================================
@@ -103,22 +116,33 @@ public:
     ~System();
     
     /**
-     * Initialize the Integrall system
-     * @param config Device configuration (WiFi, backend, etc.)
-     * @return true if initialization successful
+     * Initialize the Integrall system with a config struct
      */
     bool begin(const DeviceConfig& config);
     
     /**
-     * Main loop handler - call this in your loop() function
-     * Handles WiFi, backend communication, module updates
+     * The Easiest Way: Initialize WiFi and Cloud in one line
+     * @param ssid     Your WiFi name
+     * @param pass     Your WiFi password
+     * @param url      Your backend URL (optional)
      */
-    void handle();
+    bool begin(const char* ssid, const char* pass, const char* url = nullptr) {
+        DeviceConfig config;
+        config.wifi_ssid = ssid;
+        config.wifi_password = pass;
+        config.backend_url = url;
+        return begin(config);
+    }
     
     /**
-     * Start the system without WiFi (for basic Arduino boards)
+     * Start the system in Offline Mode (for standard Arduino boards)
      */
     bool begin();
+    
+    /**
+     * Main loop handler - call this in your loop() function
+     */
+    void handle();
     
     // ========================================================================
     // RELAY MODULE API (available if INTEGRALL_ENABLE_RELAY is defined)
@@ -548,6 +572,17 @@ public:
     #endif // INTEGRALL_MODULE_RGB_ENABLED
 
     // ========================================================================
+    // CAMERA MODULE API (available if INTEGRALL_ENABLE_CAMERA is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_CAMERA_ENABLED
+
+    bool enableCamera() {
+        return _camera_module.begin();
+    }
+
+    #endif // INTEGRALL_MODULE_CAMERA_ENABLED
+
+    // ========================================================================
     // SENSOR EXTRAS: DHT Temperature & Humidity
     // ========================================================================
     #if INTEGRALL_MODULE_SENSORS_ENABLED
@@ -792,11 +827,13 @@ public:
      */
     void reconnect();
     
+    #if INTEGRALL_NETWORK_AVAILABLE
     /**
      * Send telemetry data to backend
      * @param json_data JSON document with telemetry data
      */
     bool sendTelemetry(const JsonDocument& data);
+    #endif
 
     /**
      * Enable or disable automatic IoT event logging to backend
@@ -847,6 +884,18 @@ private:
 
     #if INTEGRALL_MODULE_OLED_ENABLED
     OLEDModule _oled_module;
+    #endif
+
+    #if INTEGRALL_MODULE_BUZZER_ENABLED
+    BuzzerModule _buzzer_module;
+    #endif
+
+    #if INTEGRALL_MODULE_RGB_ENABLED
+    RGBModule _rgb_module;
+    #endif
+
+    #if INTEGRALL_MODULE_CAMERA_ENABLED
+    CameraModule _camera_module;
     #endif
 
     // Lock system state
@@ -911,16 +960,20 @@ private:
      */
     void _logEvent(const char* event_type, const char* detail) {
         INTEGRALL_LOG_INFO_VAL("Event: ", event_type);
+        #if INTEGRALL_NETWORK_AVAILABLE
         if (_event_log_enabled && isOnline()) {
             StaticJsonDocument<128> doc;
             doc["event"] = event_type;
             doc["detail"] = detail;
             sendTelemetry(doc);
         }
+        #endif
     }
 
     void _handleModules();
+    #if INTEGRALL_NETWORK_AVAILABLE
     void _dispatchCommand(const char* command_type, const JsonObject& params);
+    #endif
 };
 
 } // namespace Integrall
@@ -1111,7 +1164,7 @@ const char* System::getIPAddress() const {
 }
 
 int System::getWiFiStrength() const {
-    return _device_manager.getWiFiRSSI();
+    return _device_manager.getWiFiStrength();
 }
 
 const char* System::getStatusString() const {
@@ -1132,9 +1185,11 @@ void System::reconnect() {
     _device_manager.reconnect();
 }
 
+#if INTEGRALL_NETWORK_AVAILABLE
 bool System::sendTelemetry(const JsonDocument& data) {
     return _device_manager.sendTelemetry(data);
 }
+#endif
 
 } // namespace Integrall
 

@@ -71,16 +71,11 @@
   #define INTEGRALL_MODULE_RGB_ENABLED 0
 #endif
 
-// ============================================================================
-// MORE COMPLEX SYSTEM CONFIGURATION
-// ============================================================================
-
-struct DeviceConfig {
-    const char* wifi_ssid;
-    const char* wifi_password;
-    const char* backend_url;
-    const char* api_key;
-    uint32_t poll_interval_ms = 5000;
-};
+// Camera Module
+#ifdef INTEGRALL_ENABLE_CAMERA
+  #define INTEGRALL_MODULE_CAMERA_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_CAMERA_ENABLED 0
+#endif
 
 #endif // INTEGRALL_CONFIG_H

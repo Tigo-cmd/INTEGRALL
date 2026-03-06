@@ -3,13 +3,6 @@
  * 
  * Core device management for Integrall Framework
  * Handles WiFi connection, backend registration, and device identity
- * 
- * Features:
- * - Event-driven WiFi reconnection (no polling delays)
- * - Persistent device ID (ESP32 chip ID based)
- * - Backend registration with retry logic
- * - Non-blocking operation (returns control immediately)
- * - Optional WiFiManager integration ready
  */
 
 #ifndef INTEGRALL_DEVICE_MANAGER_H
@@ -17,9 +10,24 @@
 
 #include "../config/IntegrallConfig.h"
 #include "Logger.h"
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
+
+/**
+ * ARCHITECTURE DETECTION
+ */
+#if defined(ESP32) || defined(ESP8266)
+  #define INTEGRALL_NETWORK_AVAILABLE 1
+  #include <ArduinoJson.h> 
+  #if defined(ESP32)
+    #include <WiFi.h>
+    #include <HTTPClient.h>
+  #else
+    #include <ESP8266WiFi.h>
+    #include <ESP8266HTTPClient.h>
+    #include <WiFiClient.h>
+  #endif
+#else
+  #define INTEGRALL_NETWORK_AVAILABLE 0
+#endif
 
 namespace Integrall {
 
@@ -61,16 +69,32 @@ public:
     // State queries
     DeviceState getState() const { return _state; }
     bool isOnline() const { return _state == DeviceState::ONLINE; }
-    bool isWiFiConnected() const { return WiFi.status() == WL_CONNECTED; }
+    
+    bool isWiFiConnected() const { 
+        #if INTEGRALL_NETWORK_AVAILABLE
+        return WiFi.status() == WL_CONNECTED; 
+        #else
+        return false;
+        #endif
+    }
     
     // Device identity
     const char* getDeviceId() const { return _device_id; }
     const char* getDeviceIp() const { return _device_ip; }
-    int getWiFiRSSI() const { return WiFi.RSSI(); }
+    
+    int getWiFiStrength() const { 
+        #if INTEGRALL_NETWORK_AVAILABLE
+        return WiFi.RSSI(); 
+        #else
+        return 0;
+        #endif
+    }
     
     // Backend communication
+    #if INTEGRALL_NETWORK_AVAILABLE
     bool sendTelemetry(const JsonDocument& data);
     bool sendCommandResponse(const char* command_id, bool success, const char* message = nullptr);
+    #endif
     
     // Configuration portal (WiFiManager integration point)
     bool startConfigPortal(const char* ap_name = "Integrall-Setup", 
@@ -96,7 +120,12 @@ private:
     unsigned long _registration_retry_count;
     
     // HTTP client
+    #if INTEGRALL_NETWORK_AVAILABLE
     HTTPClient _http;
+      #if !defined(ESP32)
+      WiFiClient _wifiClient; // Needed for ESP8266 HTTPClient
+      #endif
+    #endif
     
     // Internal methods
     void _generateDeviceId();
@@ -108,8 +137,10 @@ private:
     void _setError(const char* error);
     
     // WiFi event handlers (static because WiFi.onEvent requires static)
+    #if defined(ESP32)
     static void _onWiFiConnected(WiFiEvent_t event, WiFiEventInfo_t info);
     static void _onWiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info);
+    #endif
     static DeviceManager* _instance;  // Singleton pointer for callbacks
 };
 

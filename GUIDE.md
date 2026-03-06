@@ -17,12 +17,34 @@ Unlike normal Arduino code, you define what you need **BEFORE** including the li
 
 Integrall::System integrall;
 
-void setup() {
-    integrall.begin(); // Automatically handles I2C, Serial, and internal buffers
-}
+---
 
-void loop() {
-    integrall.handle(); // Keeps background tasks (WiFi, timers) running
+## 🌐 Connectivity & Cloud
+
+Integrall handles the complexity of WiFi reconnections and Backend synchronization. You can provide credentials in two ways:
+
+### 1. Global (The "Set and Forget" way)
+Best for regular development. Edit `Integrall/src/config/IntegrallConfig.h`:
+```cpp
+#define INTEGRALL_DEFAULT_SSID     "YourWifiName"
+#define INTEGRALL_DEFAULT_PASS     "YourWifiPassword"
+#define INTEGRALL_DEFAULT_BACKEND  "http://YourIp:8000"
+```
+In your sketch, you just write:
+```cpp
+integrall.begin(); // pulls from global config automatically
+```
+
+### 2. Manual (The "Portable" way)
+Best for sharing code or moving between networks.
+```cpp
+void setup() {
+    Integrall::DeviceConfig config;
+    config.wifi_ssid = "SecretNetwork";
+    config.wifi_password = "Password123";
+    config.backend_url = "http://api.integrall.io";
+    
+    integrall.begin(config);
 }
 ```
 

@@ -83,4 +83,29 @@ public:
 
 } // namespace Integrall
 
+// Logging Macros
+#if INTEGRALL_DEBUG_LEVEL >= 1
+  #define INTEGRALL_LOG_ERROR(msg) Integrall::Logger::println(F("[ERROR] " msg))
+  #define INTEGRALL_LOG_ERROR_VAL(msg, val) Integrall::Logger::print(F("[ERROR] " msg), val)
+#else
+  #define INTEGRALL_LOG_ERROR(msg)
+  #define INTEGRALL_LOG_ERROR_VAL(msg, val)
+#endif
+
+#if INTEGRALL_DEBUG_LEVEL >= 2
+  #define INTEGRALL_LOG_WARN(msg) Integrall::Logger::println(F("[WARN] " msg))
+  #define INTEGRALL_LOG_WARN_VAL(msg, val) Integrall::Logger::print(F("[WARN] " msg), val)
+#else
+  #define INTEGRALL_LOG_WARN(msg)
+  #define INTEGRALL_LOG_WARN_VAL(msg, val)
+#endif
+
+#if INTEGRALL_DEBUG_LEVEL >= 3
+  #define INTEGRALL_LOG_INFO(msg) Integrall::Logger::println(F("[INFO] " msg))
+  #define INTEGRALL_LOG_INFO_VAL(msg, val) Integrall::Logger::print(F("[INFO] " msg), val)
+#else
+  #define INTEGRALL_LOG_INFO(msg)
+  #define INTEGRALL_LOG_INFO_VAL(msg, val)
+#endif
+
 #endif // INTEGRALL_LOGGER_H
