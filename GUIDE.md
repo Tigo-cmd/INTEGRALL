@@ -310,20 +310,52 @@ if (Bluetooth.available()) {
 ```
 
 ---
+---
 
-Integrall is built for the cloud. The ESP32 automatically syncs with your server.
+## 🌐 The Python Backend & Security
 
-### Automatic Status Engine
-If you have an LCD enabled, Integrall **automatically** monitors your connection.
-- If WiFi drops, the LCD will flash: `WiFi Discon...`
-- If the Server is down, the LCD will flash: `Backend Error`
+Integrall includes a professional-grade **FastAPI** backend that acts as the "Brain" for your devices. 
 
-### Sending Telemetry
-Send sensor data to your dashboard with one command:
+### 1. How the Backend Works
+The backend creates a central point for all your ESP32s. Instead of you connecting directly to each ESP32, you connect to the **Backend**, and the backend manages the devices for you.
+
+*   **Port 5000/8000**: The backend runs on your computer or a server.
+*   **Database**: Every device registration, sensor reading, and command is logged in `integrall.db`.
+
+### 2. The API Key (X-API-Key)
+Security is built into the core. Every request the ESP32 makes must include a valid **API Key** in the header. If the key doesn't match, the server will reject the request with a `401 Unauthorized` error.
+
+**Setup Security**:
+1.  **Backend side**: Edit `backend/.env` and set `API_KEY=your_secret_string`.
+2.  **Firmware side**: Set `config.api_key = "your_secret_string"` in your sketch.
+
+### 3. Enabling the Connection
+To keep the framework lightweight, backend synchronization is **OPTIONAL**. 
+
+To enable it, you must toggle the flag in `Integrall/src/core/DeviceManager.h`:
 ```cpp
-StaticJsonDocument<128> doc;
-doc["temp"] = integrall.readAnalogPercent(A0);
-integrall.sendTelemetry(doc);
+#define INTEGRALL_BACKEND_ENABLED 1  // Set to 1 to enable cloud sync
+```
+
+### 4. Basic Backend Sketch
+```cpp
+#define INTEGRALL_ENABLE_CAMERA
+#include <Integrall.h>
+
+void setup() {
+    Integrall::DeviceConfig config;
+    config.wifi_ssid     = "WiFi_Name";
+    config.wifi_password = "Password";
+    config.backend_url   = "http://192.168.1.XX:5000"; // Your PC's IP
+    config.api_key       = "my_key_123";
+    
+    integrall.begin(config);
+    integrall.enableCamera();
+}
+
+void loop() {
+    integrall.handle(); // This pulls commands and sends data to backend
+}
 ```
 
 ---
