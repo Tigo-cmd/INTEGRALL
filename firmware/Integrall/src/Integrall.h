@@ -262,8 +262,8 @@ public:
      * Professional Non-blocking Scroll
      * Best used for long text in the loop().
      */
-    void lcdScrollText(const char* text, uint8_t row = 0) {
-        _lcd_module.scrollText(text, row);
+    void lcdScrollText(const char* text, uint8_t row = 0, uint16_t speed_ms = 300) {
+        _lcd_module.scrollText(text, row, speed_ms);
     }
 
     /**
