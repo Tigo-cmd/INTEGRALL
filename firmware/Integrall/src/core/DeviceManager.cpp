@@ -56,10 +56,6 @@ bool DeviceManager::begin(const DeviceConfig& config) {
         } else if (_config.use_wifi_manager) {
             return startConfigPortal();
         }
-    #else
-        INTEGRALL_LOG_WARN("Networking not supported on this board. Offline-only mode.");
-        _setState(DeviceState::ONLINE); // Mark as online so handle() doesn't loop
-        strncpy(_device_ip, "0.0.0.0", sizeof(_device_ip));
     #endif
     
     return true;
@@ -171,7 +167,7 @@ bool DeviceManager::_registerWithBackend() {
     doc["device_id"] = _device_id;
     doc["ip_address"] = _device_ip;
     
-    #if defined(ESP32) || defined(ESP8266)
+    #if INTEGRALL_NETWORK_AVAILABLE
     doc["mac_address"] = WiFi.macAddress();
     doc["rssi"] = WiFi.RSSI();
     doc["sdk_version"] = ESP.getSdkVersion();
@@ -226,13 +222,13 @@ void DeviceManager::_checkBackendCommands() {
 }
 
 void DeviceManager::_generateDeviceId() {
-    #if defined(ESP32) || defined(ESP8266)
+    #if INTEGRALL_NETWORK_AVAILABLE
     uint8_t mac[6];
     WiFi.macAddress(mac);
     snprintf(_device_id, sizeof(_device_id), "INT_%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     #else
-    snprintf(_device_id, sizeof(_device_id), "INT_ARDUINO_%08X", (unsigned int)millis());
+    snprintf(_device_id, sizeof(_device_id), "INT_OFFLINE_%08X", (unsigned int)millis());
     #endif
 }
 
@@ -244,7 +240,7 @@ void DeviceManager::_setError(const char* error) {
     INTEGRALL_SAFE_STRCPY(_last_error, error, sizeof(_last_error));
 }
 
-#if defined(ESP32)
+#if defined(ESP32) && INTEGRALL_NETWORK_AVAILABLE
 void DeviceManager::_onWiFiConnected(WiFiEvent_t event, WiFiEventInfo_t info) {
     if (_instance && event == WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP) {
         strncpy(_instance->_device_ip, WiFi.localIP().toString().c_str(), sizeof(_instance->_device_ip) - 1);
@@ -256,8 +252,9 @@ void DeviceManager::_onWiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
 }
 #endif
 
+#if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::sendTelemetry(const JsonDocument& data) {
-    #if INTEGRALL_NETWORK_AVAILABLE && INTEGRALL_BACKEND_ENABLED
+    #if INTEGRALL_BACKEND_ENABLED
     if (_state != DeviceState::ONLINE) return false;
     
     char url[128];
@@ -285,9 +282,11 @@ bool DeviceManager::sendTelemetry(const JsonDocument& data) {
     #endif
     return false;
 }
+#endif
 
+#if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::sendCommandResponse(const char* command_id, bool success, const char* message) {
-    #if INTEGRALL_NETWORK_AVAILABLE && INTEGRALL_BACKEND_ENABLED
+    #if INTEGRALL_BACKEND_ENABLED
     if (_state != DeviceState::ONLINE) return false;
     
     char url[128];
@@ -312,33 +311,32 @@ bool DeviceManager::sendCommandResponse(const char* command_id, bool success, co
     #endif
     return false;
 }
+#endif
 
+#if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::startConfigPortal(const char* ap_name, const char* ap_password) {
-    #if INTEGRALL_NETWORK_AVAILABLE
     _setState(DeviceState::CONFIGURING);
     WiFi.mode(WIFI_AP);
     WiFi.softAP(ap_name, ap_password);
     return true;
-    #endif
-    return false;
 }
+#endif
 
+#if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::stopConfigPortal() {
-    #if INTEGRALL_NETWORK_AVAILABLE
     WiFi.softAPdisconnect(true);
     _setState(DeviceState::DISCONNECTED);
     return true;
-    #endif
-    return false;
 }
+#endif
 
+#if INTEGRALL_NETWORK_AVAILABLE
 void DeviceManager::reconnect() {
-    #if INTEGRALL_NETWORK_AVAILABLE
     if (_state == DeviceState::DISCONNECTED || _state == DeviceState::ERROR) {
         _setState(DeviceState::CONNECTING_WIFI);
         WiFi.reconnect();
     }
-    #endif
 }
+#endif
 
 } // namespace Integrall

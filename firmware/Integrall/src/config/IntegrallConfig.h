@@ -35,6 +35,13 @@
 // These are set by defining flags in your sketch BEFORE Integrall.h
 // ============================================================================
 
+// WiFi & Networking
+#ifdef INTEGRALL_ENABLE_WIFI
+  #define INTEGRALL_MODULE_WIFI_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_WIFI_ENABLED 0
+#endif
+
 // Relay Module
 #ifdef INTEGRALL_ENABLE_RELAY
   #define INTEGRALL_MODULE_RELAY_ENABLED 1
@@ -93,8 +100,12 @@
 
 // Camera Module
 #ifdef INTEGRALL_ENABLE_CAMERA
-  #define INTEGRALL_MODULE_CAMERA_ENABLED 1
-  // Default to AI-Thinker if no other model is specified
+  #if !INTEGRALL_MODULE_WIFI_ENABLED
+    #warning "Integrall: Camera requires INTEGRALL_ENABLE_WIFI to function. Disabling Camera."
+    #define INTEGRALL_MODULE_CAMERA_ENABLED 0
+  #else
+    #define INTEGRALL_MODULE_CAMERA_ENABLED 1
+    // Default to AI-Thinker if no other model is specified
   #if !defined(CAMERA_MODEL_WROVER_KIT) && !defined(CAMERA_MODEL_ESP_EYE) && \
       !defined(CAMERA_MODEL_M5STACK_PSRAM) && !defined(CAMERA_MODEL_AI_THINKER) && \
       !defined(CAMERA_MODEL_M5STACK_V2_PSRAM) && !defined(CAMERA_MODEL_M5STACK_WIDE) && \
@@ -105,6 +116,7 @@
       !defined(CAMERA_MODEL_ESP32S3_EYE) && !defined(CAMERA_MODEL_DFRobot_FireBeetle2_ESP32S3) && \
       !defined(CAMERA_MODEL_DFRobot_Romeo_ESP32S3)
     #define CAMERA_MODEL_AI_THINKER
+  #endif
   #endif
 #else
   #define INTEGRALL_MODULE_CAMERA_ENABLED 0

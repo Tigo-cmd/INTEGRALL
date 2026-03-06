@@ -7,8 +7,8 @@ Welcome to the **Integrall** documentation. This guide is updated in real-time a
 ## 🛠️ Getting Started (The "Integrall" Way)
 The philosophy of Integrall is **Complexity Abstraction**. We hide the "ugly" setup so you can write logic in one line.
 
-### 1. Minimal Sketch Structure
-Unlike normal Arduino code, you define what you need **BEFORE** including the library.
+### 1. Minimal Sketch Structure (Offline Mode)
+By default, Integrall stays **OFFLINE**. This is perfect for simple projects (Standard Arduino, Serial to LCD, etc.) and produces ZERO WiFi logs.
 
 ```cpp
 #define INTEGRALL_ENABLE_RELAY
@@ -16,6 +16,15 @@ Unlike normal Arduino code, you define what you need **BEFORE** including the li
 #include <Integrall.h>
 
 Integrall::System integrall;
+```
+
+### 2. Enabling WiFi
+If you need connectivity, you **MUST** enable it explicitly BEFORE including the library.
+
+```cpp
+#define INTEGRALL_ENABLE_WIFI
+#include <Integrall.h>
+```
 
 ---
 
@@ -43,10 +52,14 @@ void setup() {
     config.wifi_ssid = "SecretNetwork";
     config.wifi_password = "Password123";
     config.backend_url = "http://api.integrall.io";
+    config.api_key = "your-key";
     
     integrall.begin(config);
 }
 ```
+
+> [!IMPORTANT]
+> **Manual Config** still requires `#define INTEGRALL_ENABLE_WIFI` at the top of your sketch to activate the networking hardware!
 
 ---
 
@@ -396,3 +409,4 @@ In the `integrall.handle()` function, the framework periodically "asks" the back
 1. **Highlighting**: If your code is all black, make sure you have the `keywords.txt` file in your library folder.
 2. **Library Missing**: If `ArduinoJson.h` is missing, use the Library Manager to install it.
 3. **ESP32 Issues**: Make sure to install the `ESP32Servo` library for the best performance.
+4. **Missing Libraries**: Refer to [DEPENDENCIES.md](DEPENDENCIES.md) for a complete list of required and recommended libraries for each module.

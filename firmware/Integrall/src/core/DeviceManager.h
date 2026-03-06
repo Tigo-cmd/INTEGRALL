@@ -17,9 +17,9 @@
 #endif
 
 /**
- * ARCHITECTURE DETECTION
+ * ARCHITECTURE DETECTION & NETWORKING ENABLEMENT
  */
-#if defined(ESP32) || defined(ESP8266)
+#if (defined(ESP32) || defined(ESP8266)) && INTEGRALL_MODULE_WIFI_ENABLED
   #define INTEGRALL_NETWORK_AVAILABLE 1
   #include <ArduinoJson.h> 
   #if defined(ESP32)
@@ -142,7 +142,7 @@ private:
     void _setError(const char* error);
     
     // WiFi event handlers (static because WiFi.onEvent requires static)
-    #if defined(ESP32)
+    #if defined(ESP32) && INTEGRALL_NETWORK_AVAILABLE
     static void _onWiFiConnected(WiFiEvent_t event, WiFiEventInfo_t info);
     static void _onWiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info);
     #endif

@@ -257,6 +257,28 @@ public:
     void lcdBacklight(bool on) {
         _lcd_module.setBacklight(on);
     }
+
+    /**
+     * Professional Non-blocking Scroll
+     * Best used for long text in the loop().
+     */
+    void lcdScrollText(const char* text, uint8_t row = 0) {
+        _lcd_module.scrollText(text, row);
+    }
+
+    /**
+     * Control the LCD blinking/fixed cursor
+     */
+    void lcdCursor(bool visible, bool blink = false) {
+        _lcd_module.setCursorVisible(visible, blink);
+    }
+
+    /**
+     * Load a custom shape into memory (0-7 slots)
+     */
+    void lcdCreateChar(uint8_t slot, uint8_t charMap[]) {
+        _lcd_module.createCustomChar(slot, charMap);
+    }
     
     #endif  // INTEGRALL_MODULE_LCD_ENABLED
     
@@ -1044,6 +1066,14 @@ bool System::begin(const DeviceConfig& config) {
         INTEGRALL_LOG_ERROR("LCDModule initialization failed");
     }
     #endif
+
+    #if INTEGRALL_MODULE_CAMERA_ENABLED
+    // Camera init should happen after WiFi if WiFi is intended, 
+    // but CameraModule itself handles the WiFi dependency now.
+    if (!_camera_module.begin()) {
+        INTEGRALL_LOG_ERROR("CameraModule initialization failed");
+    }
+    #endif
     
     _initialized = true;
     INTEGRALL_LOG_INFO("=== Integrall System Ready ===");
@@ -1057,7 +1087,7 @@ void System::handle() {
     _device_manager.handle();
     
     // Auto-update LCD with WiFi status if enabled
-    #if INTEGRALL_MODULE_LCD_ENABLED
+    #if INTEGRALL_MODULE_LCD_ENABLED && INTEGRALL_MODULE_WIFI_ENABLED
     static unsigned long _last_status_update = 0;
     if (millis() - _last_status_update > 5000) {
         if (!isWiFiConnected()) {
@@ -1070,7 +1100,7 @@ void System::handle() {
     #endif
 
     // Auto-start Camera Server when WiFi becomes available
-    #if INTEGRALL_MODULE_CAMERA_ENABLED
+    #if INTEGRALL_MODULE_CAMERA_ENABLED && INTEGRALL_MODULE_WIFI_ENABLED
     if (isWiFiConnected() && !_camera_module.isServerRunning()) {
         _camera_module.startServer();
     }
@@ -1081,6 +1111,10 @@ void System::handle() {
 }
 
 bool System::begin() {
+    // Ensure the core device manager starts (this initializes Serial/Logger)
+    DeviceConfig defaultConfig;
+    _device_manager.begin(defaultConfig);
+    
     INTEGRALL_LOG_INFO("=== Integrall Module Initialization ===");
     
     #if INTEGRALL_MODULE_LCD_ENABLED
@@ -1100,6 +1134,10 @@ void System::_handleModules() {
     
     #if INTEGRALL_MODULE_BUZZER_ENABLED
     _buzzer_module.handle();
+    #endif
+
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    _lcd_module.handle();
     #endif
 
     _blinker.handle();
