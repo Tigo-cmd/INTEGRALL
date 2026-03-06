@@ -26,7 +26,8 @@ bool DeviceManager::begin(const DeviceConfig& config) {
     _instance = this;  // Set static pointer for callbacks
     
     Logger::begin();
-    INTEGRALL_LOG_INFO("Integrall DeviceManager v" INTEGRALL_VERSION_STRING);
+    INTEGRALL_LOG_INFO("Integrall System Starting...");
+    INTEGRALL_LOG_INFO_VAL("Version: ", INTEGRALL_VERSION_STRING);
     
     // Generate unique device ID
     _generateDeviceId();
@@ -72,9 +73,15 @@ void DeviceManager::handle() {
             break;
             
         case DeviceState::WIFI_CONNECTED:
+            #if INTEGRALL_BACKEND_ENABLED
             if (_config.backend_url) {
                 _setState(DeviceState::REGISTERING);
+            } else {
+                _setState(DeviceState::ONLINE);
             }
+            #else
+            _setState(DeviceState::ONLINE);
+            #endif
             break;
             
         case DeviceState::REGISTERING:
@@ -92,10 +99,12 @@ void DeviceManager::handle() {
             break;
             
         case DeviceState::ONLINE:
+            #if INTEGRALL_BACKEND_ENABLED
             if (millis() - _last_poll_time >= _config.poll_interval_ms) {
                 _checkBackendCommands();
                 _last_poll_time = millis();
             }
+            #endif
             break;
             
         default:
@@ -150,7 +159,7 @@ void DeviceManager::_handleWiFiReconnect() {
 }
 
 bool DeviceManager::_registerWithBackend() {
-    #if INTEGRALL_NETWORK_AVAILABLE
+    #if INTEGRALL_NETWORK_AVAILABLE && INTEGRALL_BACKEND_ENABLED
     if (!_config.backend_url || !_config.api_key) {
         return false;
     }
@@ -190,7 +199,7 @@ bool DeviceManager::_registerWithBackend() {
 }
 
 void DeviceManager::_checkBackendCommands() {
-    #if INTEGRALL_NETWORK_AVAILABLE
+    #if INTEGRALL_NETWORK_AVAILABLE && INTEGRALL_BACKEND_ENABLED
     if (!_config.backend_url || !_config.api_key) return;
     
     char url[128];
@@ -248,7 +257,7 @@ void DeviceManager::_onWiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
 #endif
 
 bool DeviceManager::sendTelemetry(const JsonDocument& data) {
-    #if INTEGRALL_NETWORK_AVAILABLE
+    #if INTEGRALL_NETWORK_AVAILABLE && INTEGRALL_BACKEND_ENABLED
     if (_state != DeviceState::ONLINE) return false;
     
     char url[128];
@@ -278,7 +287,7 @@ bool DeviceManager::sendTelemetry(const JsonDocument& data) {
 }
 
 bool DeviceManager::sendCommandResponse(const char* command_id, bool success, const char* message) {
-    #if INTEGRALL_NETWORK_AVAILABLE
+    #if INTEGRALL_NETWORK_AVAILABLE && INTEGRALL_BACKEND_ENABLED
     if (_state != DeviceState::ONLINE) return false;
     
     char url[128];

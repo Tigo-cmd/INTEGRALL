@@ -11,6 +11,11 @@
 #include "../config/IntegrallConfig.h"
 #include "Logger.h"
 
+// Set to 0 to completely skip all backend logic (registration, telemetry, commands)
+#ifndef INTEGRALL_BACKEND_ENABLED
+  #define INTEGRALL_BACKEND_ENABLED 0
+#endif
+
 /**
  * ARCHITECTURE DETECTION
  */

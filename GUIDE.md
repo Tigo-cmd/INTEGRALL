@@ -123,7 +123,24 @@ Control multi-color LEDs with named colors or RGB values.
   - `integrall.setRGB(r, g, b);` - Custom color balance.
   - `integrall.rgbBlink(r, g, b, ms);` - **Non-blocking** color blink.
 
-### 9. Non-Blocking Blinker
+### 9. ESP32-CAM Video Stream
+Professional MJPEG streaming with zero boilerplate.
+- **Setup**: `#define INTEGRALL_ENABLE_CAMERA`
+- **Pick your Board**: Simply define your model at the **very top** of your sketch (e.g., `#define CAMERA_MODEL_AI_THINKER`).
+- **Supported Models**: AI-Thinker, Wrover Kit, ESP-EYE, M5Stack (all versions), TTGO T-Journal, Xiao ESP32S3, and more.
+- **Commands**:
+  - `integrall.enableCamera();` - Inits hardware and **auto-starts** a web server on Port 81 as soon as WiFi connects.
+  - `const char* url = integrall.getCameraStreamURL();` - Get the link to your live video feed.
+  - `integrall.startCameraServer();` - Manually start/restart the server if needed.
+
+**Smart Memory Management**: Integrall automatically detects if your board has **PSRAM**. If it does, it enables High-Quality UXGA (1600x1200) streaming. If not, it safely downscales to prevent crashes.
+
+> [!NOTE]
+> **Backend Status**: Cloud backend features are currently **DISCONNECTED** by default in this version to focus on local library reliability. Telemetry and remote commands are disabled.
+
+**Why use this?** A standard ESP32-CAM sketch is over 200 lines of complex pin mapping and HTTP handling. Integrall reduces this to **one line**.
+
+### 10. Non-Blocking Blinker
 The ultimate replacement for the "Blink" example. No `delay()` needed.
 - **Commands**:
   - `integrall.blink(pin, interval);` - Start blinking in the background.

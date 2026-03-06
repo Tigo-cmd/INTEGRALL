@@ -1,10 +1,3 @@
-/**
- * CameraModule.h
- * 
- * Hides all ESP32-CAM boilerplate.
- * Supports AI-Thinker and other common models.
- */
-
 #ifndef INTEGRALL_CAMERA_MODULE_H
 #define INTEGRALL_CAMERA_MODULE_H
 
@@ -13,32 +6,26 @@
 #if INTEGRALL_MODULE_CAMERA_ENABLED
 #include "esp_camera.h"
 #include <WiFi.h>
+#include "camera/camera_pins.h"
 
-// AI-Thinker Pin Map (Hidden from user)
-#define PWDN_GPIO_NUM     32
-#define RESET_GPIO_NUM    -1
-#define XCLK_GPIO_NUM      0
-#define SIOD_GPIO_NUM     26
-#define SIOC_GPIO_NUM     27
-#define Y9_GPIO_NUM       35
-#define Y8_GPIO_NUM       34
-#define Y7_GPIO_NUM       39
-#define Y6_GPIO_NUM       36
-#define Y5_GPIO_NUM       21
-#define Y4_GPIO_NUM       19
-#define Y3_GPIO_NUM       18
-#define Y2_GPIO_NUM        5
-#define VSYNC_GPIO_NUM    25
-#define HREF_GPIO_NUM     23
-#define PCLK_GPIO_NUM     22
+// External declarations for the server logic in app_httpd.cpp
+void startCameraServer();
+void setupLedFlash();
+
+#include "../core/Logger.h"
 
 namespace Integrall {
 
 class CameraModule {
 public:
-    CameraModule() : _initialized(false) {}
+    CameraModule() : _initialized(false), _server_started(false) {}
 
+    /**
+     * Start the camera hardware with settings optimized for the current board
+     */
     bool begin() {
+        if (_initialized) return true;
+
         camera_config_t config;
         config.ledc_channel = LEDC_CHANNEL_0;
         config.ledc_timer = LEDC_TIMER_0;
@@ -59,31 +46,63 @@ public:
         config.pin_pwdn = PWDN_GPIO_NUM;
         config.pin_reset = RESET_GPIO_NUM;
         config.xclk_freq_hz = 20000000;
-        config.frame_size = FRAMESIZE_UXGA;
-        config.pixel_format = PIXFORMAT_JPEG;
+        config.frame_size = FRAMESIZE_VGA; // Use VGA (640x480) for better speed/lag balance
+        config.pixel_format = PIXFORMAT_JPEG; // for streaming
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
         config.fb_location = CAMERA_FB_IN_PSRAM;
         config.jpeg_quality = 12;
         config.fb_count = 1;
 
-        if (psramFound()) {
-            config.jpeg_quality = 10;
-            config.fb_count = 2;
-            config.grab_mode = CAMERA_GRAB_LATEST;
-        } else {
-            config.frame_size = FRAMESIZE_SVGA;
-            config.fb_location = CAMERA_FB_IN_DRAM;
+        // if PSRAM IC present, allow higher quality but keep VGA as baseline
+        if (config.pin_xclk != -1) {
+            if (psramFound()) {
+                config.jpeg_quality = 10;
+                config.fb_count = 2;
+                config.grab_mode = CAMERA_GRAB_LATEST;
+            } else {
+                // Limit the frame size when PSRAM is not available
+                config.frame_size = FRAMESIZE_VGA;
+                config.fb_location = CAMERA_FB_IN_DRAM;
+            }
         }
 
+        // camera init
+        INTEGRALL_LOG_INFO("Camera: Initializing hardware...");
         esp_err_t err = esp_camera_init(&config);
-        _initialized = (err == ESP_OK);
-        return _initialized;
+        if (err != ESP_OK) {
+            INTEGRALL_LOG_ERROR("Camera: Hardware init failed!");
+            return false;
+        }
+
+        INTEGRALL_LOG_INFO("Camera: Hardware Ready");
+        _initialized = true;
+        
+        // Auto-start web server if networking is up
+        if (WiFi.status() == WL_CONNECTED) {
+            INTEGRALL_LOG_INFO("Camera: Starting MJPEG server...");
+            startServer();
+        }
+        
+        return true;
+    }
+
+    /**
+     * Start the MJPEG stream server
+     */
+    void startServer() {
+        if (!_initialized || _server_started) return;
+        
+        setupLedFlash();
+        startCameraServer();
+        _server_started = true;
     }
 
     bool isReady() const { return _initialized; }
+    bool isServerRunning() const { return _server_started; }
 
 private:
     bool _initialized;
+    bool _server_started;
 };
 
 } // namespace Integrall

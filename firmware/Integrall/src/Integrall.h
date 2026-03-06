@@ -551,8 +551,15 @@ public:
     void buzzerSuccess() { _buzzer_module.success(); }
     void buzzerFail()    { _buzzer_module.failure(); }
     void buzzerOff()     { _buzzer_module.off(); }
-
-    #endif // INTEGRALL_MODULE_BUZZER_ENABLED
+    #else
+    void buzzerSuccess() {}
+    void buzzerFail()    {}
+    void buzzerOff()     {}
+    bool enableBuzzer(uint8_t pin) { return false; }
+    void buzzerBeep(uint32_t ms = 200) {}
+    void buzzerPattern(uint8_t n, uint32_t on = 150, uint32_t off = 100) {}
+    void buzzerAlert()   {}
+    #endif
 
     // ========================================================================
     // RGB LED API (available if INTEGRALL_ENABLE_RGB is defined)
@@ -576,8 +583,27 @@ public:
     // ========================================================================
     #if INTEGRALL_MODULE_CAMERA_ENABLED
 
+    /**
+     * Start the camera hardware with default pins for the selected board
+     */
     bool enableCamera() {
         return _camera_module.begin();
+    }
+
+    /**
+     * Manually start the MJPEG stream server if it didn't start automatically
+     */
+    void startCameraServer() {
+        _camera_module.startServer();
+    }
+
+    /**
+     * Get the stream URL (requires WiFi to be connected)
+     */
+    const char* getCameraStreamURL() {
+        static char url[64];
+        snprintf(url, sizeof(url), "http://%s:81/stream", getIPAddress());
+        return url;
     }
 
     #endif // INTEGRALL_MODULE_CAMERA_ENABLED
@@ -1042,7 +1068,14 @@ void System::handle() {
         _last_status_update = millis();
     }
     #endif
-    
+
+    // Auto-start Camera Server when WiFi becomes available
+    #if INTEGRALL_MODULE_CAMERA_ENABLED
+    if (isWiFiConnected() && !_camera_module.isServerRunning()) {
+        _camera_module.startServer();
+    }
+    #endif
+
     // Handle modules
     _handleModules();
 }
