@@ -66,11 +66,14 @@ void setup() {
 ## 🔌 Hardware Modules
 
 ### 1. LCD Display (I2C)
-Hides all the `Wire.h` and address management. 
+Hides all the `Wire.h` and address management, while offering dynamic features.
 - **Setup**: `#define INTEGRALL_ENABLE_LCD`
 - **Commands**:
-  - `integrall.lcdPrint("Text", col, row);` - Direct printing.
+  - `integrall.lcdPrint("Text", col, row);` - Direct printing. Wait... if you send a long string (e.g., >16 chars), Integrall will **automatically** scroll it for you!
   - `integrall.lcdClear();` - Clear the screen.
+  - `integrall.lcdScrollText("Long Text", row, speed_ms);` - Force professional non-blocking scrolling on a specific row.
+  - `integrall.lcdCursor(true, true);` - Show a blinking cursor.
+  - `integrall.lcdCreateChar(0, myHeartArr);` - Easily draw custom symbols like batteries or hearts.
 
 ### 2. Servo Motors
 Works on **ESP32** and **Arduino Uno** with the same code.
@@ -98,16 +101,25 @@ Standard relay control with professional safety features.
   - `integrall.relayOn(index);` / `integrall.relayOff(index);` / `integrall.relayToggle(index);` - Control.
   - `integrall.relaySetTimeout(index, 30000);` - **Auto-off** safety timer (30 seconds).
   - `integrall.relaySetInterlock(index, group);` - Prevent two relays in the same group turning on simultaneously (safety).
+
   - `integrall.relayAttachButton(index, pin);` - Attach a physical button to a relay (hardware override).
 
-### 5. Matrix Keypad
+### 5. Matrix Keypad & Auto-Lock System
 Hides row/column scanning and debounce logic completely.
 - **Setup**: `#define INTEGRALL_ENABLE_KEYPAD`
-- **Commands**:
+- **Core Commands**:
   - `integrall.enableKeypad(rowPins, colPins);` - Initialize. Works with 4x4 or 4x3 keypads.
   - `char k = integrall.keypadGetKey();` - Read the currently pressed key (raw).
   - `integrall.keypadCapture(maxLen);` - Build a string from keypresses. `*` = Backspace, `#` = Enter.
   - `integrall.keypadCheckPin("1234");` - Validate string against a PIN. Clears buffer automatically.
+
+- **The "Auto-Lock" System**:
+  Why write 100 lines of `if/else` logic for a PIN lock? Just tell Integrall your password and the Relay you want to open:
+  ```cpp
+  // PIN, relay index, unlock duration ms, max wrong tries
+  integrall.lockSetup("1234", doorRelay, 5000, 3);
+  ```
+  Then, put `integrall.lockUpdate();` in your `loop()`. Integrall will automatically scan keys, print asterisks `*` to the LCD, handle backspaces, check the PIN, open the door, and lock out hackers!
 
 ### 6. OLED Display (SSD1306)
 Native I2C OLED support with text, values, and progress bars.

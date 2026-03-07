@@ -11,6 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include "../../config/IntegrallConfig.h"
+
+#if defined(ESP32)
+
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_camera.h"
@@ -19,7 +23,6 @@
 #include "esp32-hal-ledc.h"
 #include "sdkconfig.h"
 #include "camera_index.h"
-#include "../../config/IntegrallConfig.h"
 #include "camera_pins.h"
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
@@ -771,3 +774,5 @@ void setupLedFlash() {
   ledcAttach(LED_GPIO_NUM, 5000, 8);
 #endif
 }
+
+#endif // defined(ESP32)

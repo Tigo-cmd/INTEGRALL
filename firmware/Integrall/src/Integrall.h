@@ -462,13 +462,17 @@ public:
         const char* input = _keypad_module.captureString(8);
 
         #if INTEGRALL_MODULE_LCD_ENABLED
-        // Show asterisks on row 1, padded with spaces
-        char stars[17];
+        // Show asterisks on row 1, padded with spaces, or "Enter PIN:" if empty
+        char row1[17];
         uint8_t len = strlen(input);
-        for (uint8_t i = 0; i < 16; i++)
-            stars[i] = (i < len) ? '*' : ' ';
-        stars[16] = '\0';
-        _lcd_module.print(stars, 0, 1);
+        if (len == 0) {
+            strncpy(row1, "  Enter PIN:    ", 17);
+        } else {
+            for (uint8_t i = 0; i < 16; i++)
+                row1[i] = (i < len) ? '*' : ' ';
+            row1[16] = '\0';
+        }
+        _lcd_module.print(row1, 0, 1);
         #endif
 
         // When '#' is pressed, evaluate the PIN

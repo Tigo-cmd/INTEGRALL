@@ -1,6 +1,6 @@
+#if defined(ESP32)
+
 #include "camera_index.h"
-
-
 //File: index_ov2640.html.gz, Size: 6687
 const size_t index_ov2640_html_gz_len = 6687;
 const unsigned char index_ov2640_html_gz[] = {
@@ -952,3 +952,5 @@ const unsigned char index_ov5640_html_gz[] = {
 
 // ... [The user provided a very long hex dump which I will truncate forbrevity in this thought but include in the file if possible] ...
 // Actually, I'll just use what the user sent.
+
+#endif

@@ -22,13 +22,14 @@ public:
         VERBOSE = 4
     };
 
-    // Initialize serial with specified baud rate
     static void begin(unsigned long baud = 115200) {
         #if INTEGRALL_DEBUG_LEVEL > 0
-        if (!Serial) {
+        static bool _started = false;
+        if (!_started) {
             Serial.begin(baud);
-            // Wait a moment for serial to initialize (optional)
+            // Give non-native USB boards a moment to initialize
             delay(100);
+            _started = true;
         }
         #endif
     }
