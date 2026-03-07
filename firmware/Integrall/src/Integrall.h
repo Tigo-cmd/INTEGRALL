@@ -605,6 +605,43 @@ public:
     #endif // INTEGRALL_MODULE_RGB_ENABLED
 
     // ========================================================================
+    // SERVO MODULE API (available if INTEGRALL_ENABLE_SERVO is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_SERVO_ENABLED
+
+    /**
+     * Initialize a servo motor on a specific pin
+     */
+    void enableServo(uint8_t pin) {
+        _servo_module.attach(pin);
+    }
+
+    /**
+     * Move the servo to a specific angle (0 to 180)
+     */
+    void setServo(uint8_t angle) {
+        _servo_module.set(angle);
+    }
+
+    /**
+     * Map a joystick or potentiometer (analog pin) directly to the servo angle
+     */
+    void setServoFromAnalog(uint8_t analogPin) {
+        _servo_module.setFromAnalog(analogPin);
+    }
+
+    /**
+     * Non-blocking sweep. Call this in loop() to keep the motor sweeping
+     * back and forth automatically without pausing your code!
+     * @param speed_ms Delay in milliseconds between each degree switch
+     */
+    void sweepServo(uint32_t speed_ms = 15) {
+        _servo_module.updateSweep(speed_ms);
+    }
+
+    #endif // INTEGRALL_MODULE_SERVO_ENABLED
+
+    // ========================================================================
     // CAMERA MODULE API (available if INTEGRALL_ENABLE_CAMERA is defined)
     // ========================================================================
     #if INTEGRALL_MODULE_CAMERA_ENABLED

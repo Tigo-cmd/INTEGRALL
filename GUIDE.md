@@ -76,13 +76,13 @@ Hides all the `Wire.h` and address management, while offering dynamic features.
   - `integrall.lcdCreateChar(0, myHeartArr);` - Easily draw custom symbols like batteries or hearts.
 
 ### 2. Servo Motors
-Works on **ESP32** and **Arduino Uno** with the same code.
+Works identically on **ESP32** and **Arduino Uno/Nano** (auto-swaps hardware timers).
 - **Setup**: `#define INTEGRALL_ENABLE_SERVO`
-- **One-Liners**:
-  - `integrall.setServo(pin, angle);` - Move to angle (0-180).
-  - `integrall.setServoFromAnalog(servo_pin, pot_pin);` - Automatically maps a potentiometer (Analog pin) to the motor angle.
-  - `integrall.sweepServo(pin, speed_ms);` - **Non-blocking** sweep. The motor moves back and forth while your code keeps running (no `delay` used!).
-
+- **Commands**:
+  - `integrall.enableServo(pin);` - Attach the physical GPIO pin.
+  - `integrall.setServo(angle);` - Move motor precisely to angle (0-180).
+  - `integrall.setServoFromAnalog(analog_pin);` - The "Potentiometer Trick". Automatically maps an analog twist knob (0-100%) to the motor angle (0-180) in one line.
+  - `integrall.sweepServo(speed_ms);` - **Non-blocking** sweep. Put this in your `loop()` and the motor moves back and forth automatically without freezing your other code!
 ### 3. Sensors (Ultrasonic, PIR, Analog)
 No more complex math or timing logic.
 - **Setup**: `#define INTEGRALL_ENABLE_SENSORS`
