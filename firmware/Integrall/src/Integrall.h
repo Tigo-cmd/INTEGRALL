@@ -144,6 +144,41 @@ public:
      */
     void handle();
     
+    /**
+     * Simple formatted printing to the Serial monitor (acts like printf).
+     * @param format The string format (e.g. "Angle: %d degrees")
+     */
+    void print(const char* format, ...) {
+        #if INTEGRALL_DEBUG_LEVEL > 0
+        if (Logger::ready()) {
+            char buffer[128];
+            va_list args;
+            va_start(args, format);
+            vsnprintf(buffer, sizeof(buffer), format, args);
+            va_end(args);
+            Serial.print(buffer);
+        }
+        #endif
+    }
+
+    /**
+     * Simple formatted printing to the Serial monitor with a newline.
+     * @param format The string format (e.g. "Angle: %d degrees")
+     */
+    void println(const char* format, ...) {
+        #if INTEGRALL_DEBUG_LEVEL > 0
+        if (Logger::ready()) {
+            char buffer[128];
+            va_list args;
+            va_start(args, format);
+            vsnprintf(buffer, sizeof(buffer), format, args);
+            va_end(args);
+            Serial.println(buffer);
+        }
+        #endif
+    }
+
+    
     // ========================================================================
     // RELAY MODULE API (available if INTEGRALL_ENABLE_RELAY is defined)
     // ========================================================================
@@ -332,35 +367,7 @@ public:
     // ========================================================================
     // SERVO MODULE API (available if INTEGRALL_ENABLE_SERVO is defined)
     // ========================================================================
-    #if INTEGRALL_MODULE_SERVO_ENABLED
-    
-    /**
-     * Control a servo motor
-     * @param pin GPIO pin for PWM
-     * @param angle Angle to set (0-180)
-     */
-    void setServo(uint8_t pin, uint8_t angle) {
-        _servo_module.attach(pin);
-        _servo_module.set(angle);
-    }
-    
-    /**
-     * Map a pot or sensor directly to a servo
-     */
-    void setServoFromAnalog(uint8_t servo_pin, uint8_t analog_pin) {
-        _servo_module.attach(servo_pin);
-        _servo_module.setFromAnalog(analog_pin);
-    }
-    
-    /**
-     * Start a non-blocking sweep of the servo
-     */
-    void sweepServo(uint8_t pin, uint32_t speed_ms = 15) {
-        _servo_module.attach(pin);
-        _servo_module.updateSweep(speed_ms);
-    }
-    
-    #endif // INTEGRALL_MODULE_SERVO_ENABLED
+    // (Legacy Servo API removed - see new multi-servo API below)
 
     // ========================================================================
     // KEYPAD MODULE API (available if INTEGRALL_ENABLE_KEYPAD is defined)
@@ -610,34 +617,36 @@ public:
     #if INTEGRALL_MODULE_SERVO_ENABLED
 
     /**
-     * Initialize a servo motor on a specific pin
+     * Initialize a servo motor on a specific pin, with an optional starting angle
+     * @return The servo index ID (0 to 3) for multi-servo control, or -1 if full.
      */
-    void enableServo(uint8_t pin) {
-        _servo_module.attach(pin);
+    int enableServo(uint8_t pin, int startAngle = -1) {
+        return _servo_module.attach(pin, startAngle);
     }
 
     /**
-     * Move the servo to a specific angle (0 to 180)
+     * Move the servo to a specific angle (0 to 180) instantly
      */
-    void setServo(uint8_t angle) {
-        _servo_module.set(angle);
-    }
+    void setServo(uint8_t angle) { _servo_module.set(0, angle); }
+    void setServo(int index, uint8_t angle) { _servo_module.set(index, angle); }
 
     /**
      * Map a joystick or potentiometer (analog pin) directly to the servo angle
      */
-    void setServoFromAnalog(uint8_t analogPin) {
-        _servo_module.setFromAnalog(analogPin);
-    }
+    void setServoFromAnalog(uint8_t analogPin) { _servo_module.setFromAnalog(0, analogPin); }
+    void setServoFromAnalog(int index, uint8_t analogPin) { _servo_module.setFromAnalog(index, analogPin); }
 
     /**
      * Non-blocking sweep. Call this in loop() to keep the motor sweeping
-     * back and forth automatically without pausing your code!
-     * @param speed_ms Delay in milliseconds between each degree switch
      */
-    void sweepServo(uint32_t speed_ms = 15) {
-        _servo_module.updateSweep(speed_ms);
-    }
+    void sweepServo(uint32_t speed_ms = 15) { _servo_module.sweep(0, speed_ms); }
+    void sweepServo(int index, uint32_t speed_ms = 15) { _servo_module.sweep(index, speed_ms); }
+
+    /**
+     * Non-blocking ease move. Slowly moves the servo to a target angle in the background.
+     */
+    void easeServo(uint8_t targetAngle, uint32_t speed_ms = 15) { _servo_module.easeTo(0, targetAngle, speed_ms); }
+    void easeServo(int index, uint8_t targetAngle, uint32_t speed_ms = 15) { _servo_module.easeTo(index, targetAngle, speed_ms); }
 
     #endif // INTEGRALL_MODULE_SERVO_ENABLED
 
@@ -1179,6 +1188,10 @@ void System::_handleModules() {
 
     #if INTEGRALL_MODULE_LCD_ENABLED
     _lcd_module.handle();
+    #endif
+
+    #if INTEGRALL_MODULE_SERVO_ENABLED
+    _servo_module.handle();
     #endif
 
     _blinker.handle();
