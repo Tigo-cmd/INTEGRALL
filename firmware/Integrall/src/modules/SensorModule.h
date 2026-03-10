@@ -85,13 +85,59 @@ public:
     }
 
     /**
-     * Helper to check if a simple digital sensor is triggered (e.g., PIR Motion)
+     * Helper to check if a simple digital sensor is triggered (e.g., PIR Motion, Flame, Tilt)
      */
     bool isTriggered(uint8_t pin, bool activeHigh = true) {
         pinMode(pin, INPUT);
         bool state = digitalRead(pin);
         return activeHigh ? state : !state;
     }
+
+    /**
+     * Alias for isTriggered - clearer for Security/Motion logic
+     */
+    bool motionDetected(uint8_t pin) { return isTriggered(pin, true); }
+
+    /**
+     * Read Soil Moisture or MQ Gas sensors (normalized to 0-100%)
+     */
+    int readPercent(uint8_t pin, bool inverted = false) {
+        int p = readAnalogPercent(pin);
+        return inverted ? (100 - p) : p;
+    }
+
+    /**
+     * Read DS18B20 Waterproof Temperature Sensor
+     * Requires DallasTemperature and OneWire libraries.
+     */
+#if __has_include(<DallasTemperature.h>)
+    float readProbeTemp(uint8_t pin, bool celsius = true) {
+        #include <OneWire.h>
+        #include <DallasTemperature.h>
+        OneWire oneWire(pin);
+        DallasTemperature sensors(&oneWire);
+        sensors.begin();
+        sensors.requestTemperatures();
+        float t = celsius ? sensors.getTempCByIndex(0) : sensors.getTempFByIndex(0);
+        return (t == DEVICE_DISCONNECTED_C || t == DEVICE_DISCONNECTED_F) ? -999.0f : t;
+    }
+#endif
+
+    /**
+     * Read BME280 Environment Sensor (Multi-function)
+     * Requires Adafruit_BME280 library.
+     */
+#if __has_include(<Adafruit_BME280.h>)
+    void readEnvironment(uint8_t addr, float &temp, float &hum, float &pres) {
+        #include <Adafruit_Sensor.h>
+        #include <Adafruit_BME280.h>
+        Adafruit_BME280 bme;
+        if (!bme.begin(addr)) { temp = hum = pres = -1.0f; return; }
+        temp = bme.readTemperature();
+        hum = bme.readHumidity();
+        pres = bme.readPressure() / 100.0f; // hPa
+    }
+#endif
 
 #if INTEGRALL_DHT_AVAILABLE
     /**

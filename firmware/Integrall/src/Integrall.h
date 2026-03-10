@@ -102,6 +102,34 @@
 #include "modules/CameraModule.h"
 #endif
 
+#if INTEGRALL_MODULE_INPUT_ENABLED
+#include "modules/InputModule.h"
+#endif
+
+#if INTEGRALL_MODULE_STORAGE_ENABLED
+#include "modules/StorageModule.h"
+#endif
+
+#if INTEGRALL_MODULE_TIME_ENABLED
+#include "modules/TimeModule.h"
+#endif
+
+#if INTEGRALL_MODULE_COMM_ENABLED
+#include "modules/CommunicationModule.h"
+#endif
+
+#if INTEGRALL_MODULE_POWER_ENABLED
+#include "modules/PowerModule.h"
+#endif
+
+#if INTEGRALL_MODULE_AUDIO_ENABLED
+#include "modules/AudioModule.h"
+#endif
+
+#if INTEGRALL_MODULE_STEPPER_ENABLED
+#include "modules/StepperModule.h"
+#endif
+
 #include "modules/BlinkerModule.h"
 
 // ============================================================================
@@ -361,6 +389,31 @@ public:
     bool isTriggered(uint8_t pin) {
         return _sensor_module.isTriggered(pin);
     }
+
+    /**
+     * Specialized Motion Detection
+     */
+    bool motionDetected(uint8_t pin) {
+        return _sensor_module.motionDetected(pin);
+    }
+
+    /**
+     * Read DS18B20 Probe Temperature
+     */
+    #if __has_include(<DallasTemperature.h>)
+    float readProbeTemp(uint8_t pin, bool celsius = true) {
+        return _sensor_module.readProbeTemp(pin, celsius);
+    }
+    #endif
+
+    /**
+     * Read BME280 Environment
+     */
+    #if __has_include(<Adafruit_BME280.h>)
+    void readEnvironment(uint8_t addr, float &temp, float &hum, float &pres) {
+        _sensor_module.readEnvironment(addr, temp, hum, pres);
+    }
+    #endif
     
     #endif // INTEGRALL_MODULE_SENSORS_ENABLED
     
@@ -649,6 +702,113 @@ public:
     void easeServo(int index, uint8_t targetAngle, uint32_t speed_ms = 15) { _servo_module.easeTo(index, targetAngle, speed_ms); }
 
     #endif // INTEGRALL_MODULE_SERVO_ENABLED
+
+    // ========================================================================
+    // INPUT MODULE API (available if INTEGRALL_ENABLE_INPUT is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_INPUT_ENABLED
+    bool inputButtonPressed(uint8_t pin, bool activeLow = true) { return _input_module.buttonPressed(pin, activeLow); }
+    int  inputReadJoystick(uint8_t pin, int center = 512, int deadzone = 50) { return _input_module.readJoystickAxis(pin, center, deadzone); }
+    bool inputTouchActive(uint8_t pin) { return _input_module.touchActive(pin); }
+    int  inputReadEncoder(uint8_t clk, uint8_t dt) { return _input_module.readEncoder(clk, dt); }
+    #endif
+
+    // ========================================================================
+    // STORAGE MODULE API (available if INTEGRALL_ENABLE_STORAGE is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_STORAGE_ENABLED
+    void storageBeginEEPROM(uint16_t size = 512) { _storage_module.beginEEPROM(size); }
+    void storageWriteInt(int addr, int data)     { _storage_module.writeInt(addr, data); }
+    int  storageReadInt(int addr)                { return _storage_module.readInt(addr); }
+    #if INTEGRALL_SD_AVAILABLE
+    bool storageLog(const char* path, const char* msg, uint8_t cs = 5) { return _storage_module.logToFile(path, msg, cs); }
+    bool storageDelete(const char* path)                              { return _storage_module.deleteFile(path); }
+    #endif
+    #endif
+
+    // ========================================================================
+    // TIME MODULE API (available if INTEGRALL_ENABLE_TIME is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_TIME_ENABLED
+    #if INTEGRALL_RTC_AVAILABLE
+    bool   timeBeginRTC() { return _time_module.beginRTC(); }
+    String timeGetStr()   { return _time_module.getTimeString(); }
+    String timeGetISO()   { return _time_module.getISODateTime(); }
+    #endif
+    #if defined(ESP32) || defined(ESP8266)
+    void timeSetupNTP(const char* srv = "pool.ntp.org", long gmt = 0, int dst = 0) { _time_module.setupNTP(srv, gmt, dst); }
+    bool timeIsSynced() { return _time_module.isSyncDone(); }
+    #endif
+    #endif
+
+    // ========================================================================
+    // COMMUNICATION MODULE API (available if INTEGRALL_ENABLE_COMM is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_COMM_ENABLED
+    #if INTEGRALL_BLE_AVAILABLE
+    bool commBeginBLE(const char* n) { return _comm_module.beginBLE(n); }
+    void commUpdateBLE(int v)        { _comm_module.updateBLEValue(v); }
+    #endif
+    #if INTEGRALL_LORA_AVAILABLE
+    bool commBeginLoRa(long f, int ss = 18, int rst = 14, int dio0 = 26) { return _comm_module.beginLoRa(f, ss, rst, dio0); }
+    void commPushLoRa(const char* p)                                     { _comm_module.pushLoRa(p); }
+    #endif
+    #endif
+
+    // ========================================================================
+    // POWER MODULE API (available if INTEGRALL_ENABLE_POWER is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_POWER_ENABLED
+    #if INTEGRALL_INA219_AVAILABLE
+    bool  powerBeginINA(uint8_t a = 0x40) { return _power_module.beginINA(a); }
+    float powerGetVoltage()               { return _power_module.getVoltage(); }
+    float powerGetCurrent()               { return _power_module.getCurrent(); }
+    float powerGetPower()                 { return _power_module.getPower(); }
+    #endif
+    int  powerGetBattery(float v)         { return _power_module.getBatteryPercent(v); }
+    void powerDeepSleep(uint32_t s)       { _power_module.deepSleep(s); }
+    #endif
+
+    // ========================================================================
+    // AUDIO MODULE API (available if INTEGRALL_ENABLE_AUDIO is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_AUDIO_ENABLED
+    #if INTEGRALL_DFPLAYER_AVAILABLE
+    bool audioBeginDF(HardwareSerial& p, int rx, int tx) { return _audio_module.beginDFPlayer(p, rx, tx); }
+    void audioPlay(int track)                            { _audio_module.playTrack(track); }
+    void audioVolume(int v)                              { _audio_module.setVolume(v); }
+    #endif
+    #if defined(ESP32)
+    int audioSoundLevel(uint8_t pin) { return _audio_module.readSoundLevel(pin); }
+    #endif
+    #endif
+
+    // ========================================================================
+    // STEPPER MODULE API (available if INTEGRALL_ENABLE_STEPPER is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_STEPPER_ENABLED
+    void stepperBegin(int spr, int p1, int p2, int p3, int p4) { _stepper_module.begin(spr, p1, p2, p3, p4); }
+    void stepperSpeed(int rpm)                                { _stepper_module.setSpeed(rpm); }
+    void stepperStep(int s)                                   { _stepper_module.step(s); }
+    void stepperMove(int deg)                                 { _stepper_module.moveDegrees(deg); }
+    #endif
+
+    // extra input methods
+    #if INTEGRALL_MODULE_INPUT_ENABLED
+    #if __has_include(<MFRC522.h>)
+    String inputReadRFID(uint8_t ss = 5, uint8_t rst = 0) { return _input_module.readRFID(ss, rst); }
+    #endif
+    #if __has_include(<IRremote.h>)
+    uint32_t inputReadIR(uint8_t pin) { return _input_module.readIR(pin); }
+    #endif
+    #endif
+
+    // extra time methods
+    #if INTEGRALL_MODULE_TIME_ENABLED
+    #if __has_include(<TinyGPS++.h>)
+    void timeGetGPS(HardwareSerial& p, float &lat, float &lng) { _time_module.getGPSLocation(p, lat, lng); }
+    #endif
+    #endif
 
     // ========================================================================
     // CAMERA MODULE API (available if INTEGRALL_ENABLE_CAMERA is defined)
@@ -994,6 +1154,34 @@ private:
 
     #if INTEGRALL_MODULE_CAMERA_ENABLED
     CameraModule _camera_module;
+    #endif
+
+    #if INTEGRALL_MODULE_INPUT_ENABLED
+    InputModule _input_module;
+    #endif
+
+    #if INTEGRALL_MODULE_STORAGE_ENABLED
+    StorageModule _storage_module;
+    #endif
+
+    #if INTEGRALL_MODULE_TIME_ENABLED
+    TimeModule _time_module;
+    #endif
+
+    #if INTEGRALL_MODULE_COMM_ENABLED
+    CommunicationModule _comm_module;
+    #endif
+
+    #if INTEGRALL_MODULE_POWER_ENABLED
+    PowerModule _power_module;
+    #endif
+
+    #if INTEGRALL_MODULE_AUDIO_ENABLED
+    AudioModule _audio_module;
+    #endif
+
+    #if INTEGRALL_MODULE_STEPPER_ENABLED
+    StepperModule _stepper_module;
     #endif
 
     // Lock system state

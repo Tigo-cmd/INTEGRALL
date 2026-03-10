@@ -122,4 +122,53 @@
   #define INTEGRALL_MODULE_CAMERA_ENABLED 0
 #endif
 
+// Input Module (Buttons, Encoders, Joysticks)
+#ifdef INTEGRALL_ENABLE_INPUT
+  #define INTEGRALL_MODULE_INPUT_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_INPUT_ENABLED 0
+#endif
+
+// Storage Module (SD, EEPROM)
+#ifdef INTEGRALL_ENABLE_STORAGE
+  #define INTEGRALL_MODULE_STORAGE_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_STORAGE_ENABLED 0
+#endif
+
+// Time Module (RTC, NTP)
+#ifdef INTEGRALL_ENABLE_TIME
+  #define INTEGRALL_MODULE_TIME_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_TIME_ENABLED 0
+#endif
+
+// Communication Module (BLE, LoRa)
+#ifdef INTEGRALL_ENABLE_COMM
+  #define INTEGRALL_MODULE_COMM_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_COMM_ENABLED 0
+#endif
+
+// Power Module (INA219, Battery)
+#ifdef INTEGRALL_ENABLE_POWER
+  #define INTEGRALL_MODULE_POWER_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_POWER_ENABLED 0
+#endif
+
+// Audio Module (DFPlayer, Speakers)
+#ifdef INTEGRALL_ENABLE_AUDIO
+  #define INTEGRALL_MODULE_AUDIO_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_AUDIO_ENABLED 0
+#endif
+
+// Stepper Module
+#ifdef INTEGRALL_ENABLE_STEPPER
+  #define INTEGRALL_MODULE_STEPPER_ENABLED 1
+#else
+  #define INTEGRALL_MODULE_STEPPER_ENABLED 0
+#endif
+
 #endif // INTEGRALL_CONFIG_H

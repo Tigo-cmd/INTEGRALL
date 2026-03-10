@@ -1,328 +1,136 @@
-# Integrall IoT Framework v0.1
+# 🌐 INTEGRALL: The Universal IoT Framework
 
-**Unified IoT firmware framework for ESP32 - simplifies hardware integration and backend communication.**
+**Build professional-grade IoT systems on ESP32 & Arduino with zero boilerplate.**
+
+Integrall is a modular, event-driven, full-stack framework that simplifies hardware development. From simple sensor nodes to complex industrial safety systems, Integrall provides the scaffolding so you can focus on logic, not registers.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PlatformIO](https://img.shields.io/badge/PlatformIO-Compatible-orange.svg)](https://platformio.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-00a393.svg)](https://fastapi.tiangolo.com/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Production--Ready-00a393.svg)](https://fastapi.tiangolo.com/)
 
-## 🎯 Vision
+---
 
-Integrall abstracts complex IoT development into a simple, unified experience:
+## 🎯 The Vision
+Integrall turns the fragmented world of Arduino libraries into a unified "Operating System" for your hardware.
+- **Complexity Abstraction**: Control 17+ hardware modules with consistent, one-liner APIs.
+- **Safety First**: Industrial-grade safety timeouts, interlock groups, and filtered sensor readings.
+- **Scalable Core**: Compile-time module selection (Pay-only-for-what-you-use).
+- **Backend-Native**: Automatic device registration, telemetry, and command polling.
 
-- **For Hobbyists**: Connect ESP32 to the cloud in 10 minutes, < 20 lines of code
-- **For Students**: Learn IoT without wrestling with low-level libraries
-- **For Startups**: Prototype fast with production-ready architecture
-- **For Developers**: Modular, scalable, event-driven architecture
+---
 
-## ✨ Features
+## 🏗️ Architecture & Project Structure
 
-### Firmware (ESP32/Arduino)
-- ✅ **Zero-config WiFi** - Auto-connect with persistent credentials
-- ✅ **Plug-and-play modules** - Relay, Keypad, LCD/OLED, Buzzer, RGB LED, Sensors
-- ✅ **High-Level Project APIs** - Build an Alarm or Lock system in < 15 lines of code
-- ✅ **Safety-first design** - Auto-off timeouts, interlock groups, debounced inputs
-- ✅ **Event-driven architecture** - Non-blocking (no `delay()`), responsive system
-- ✅ **Memory optimized** - Compile only what you need (lazy initialization)
-- ✅ **Backend integration** - Automatic registration, command polling, telemetry
+Integrall is a **full-stack** ecosystem consisting of a C++ Firmware library, a Python FastAPI backend, and a React-based developer hub.
 
-### Backend (Python/FastAPI)
-- ✅ **Async architecture** - Handles thousands of concurrent devices
-- ✅ **Auto-generated API docs** - Swagger UI at `/docs`
-- ✅ **Device command queue** - Reliable command dispatch with status tracking
-- ✅ **SQLite/PostgreSQL** - Start simple, scale to production
-- ✅ **API key security** - Simple but effective device authentication
-- ✅ **Real-time dashboard** - Device status, command history, telemetry
-
-## 🚀 Quick Start
-
-### 1. Hardware Setup (5 minutes)
-
-**Required:**
-- ESP32 development board
-- Relay module (or LED for testing)
-- USB cable
-
-**Wiring:**
-```
-ESP32 GPIO 5 → Relay IN (Signal)
-ESP32 3.3V   → Relay VCC (if required)
-ESP32 GND    → Relay GND
+```text
+INTEGRALL/
+├── firmware/              # Modular C++ Library
+│   └── Integrall/          # The core framework (src/modules, src/core)
+├── backend/               # Professional FastAPI/Python server
+├── website/               # React-based documentation & landing page
+└── examples/              # 15+ ready-to-flash project templates
 ```
 
-### 2. Backend Setup (3 minutes)
+### Firmware Compilation Flow
+The firmware follows a **modular, compile-time-conditional architecture**. Users enable only target modules via `#define` flags, ensuring zero memory overhead for unused features.
 
-```bash
-cd backend
-./start_backend.sh  # or start_backend.bat on Windows
-```
-
-The backend will start at `http://localhost:8000`
-- API Docs: http://localhost:8000/docs
-- Health Check: http://localhost:8000/health
-
-### 3. Firmware Setup (2 minutes)
-
-**Option A: PlatformIO (Recommended)**
-```bash
-cd firmware
-pio run --target upload
-pio device monitor
-```
-
-**Option B: Arduino IDE**
-1. **Install Dependencies**: Open the Library Manager (`Ctrl+Shift+I`) and install:
-   - **ArduinoJson** (by Benoit Blanchon)
-   - **LiquidCrystal I2C** (for LCD support)
-2. Copy `firmware/Integrall` to your Arduino `libraries` folder.
-3. Open `examples/BasicRelay/BasicRelay.ino`.
-4. Update WiFi credentials and backend URL.
-5. Upload to ESP32.
-
-### 4. See It Work!
-
-1. Open Serial Monitor (115200 baud) - see device register with backend
-2. Open http://localhost:8000/docs
-3. POST to `/api/commands` to turn relay on/off:
-```json
-{
-  "device_id": "INT_A1B2C3D4E5F6",
-  "command_type": "relay_on",
-  "parameters": {"pin": 5}
-}
-```
-
-## 📁 Project Structure
-
-```
-integrall/
-├── firmware/              # ESP32 Arduino library
-│   ├── Integrall/
-│   │   ├── src/
-│   │   │   ├── Integrall.h          # Main user API
-│   │   │   ├── config/
-│   │   │   │   └── IntegrallConfig.h # Compile-time configuration
-│   │   │   ├── core/
-│   │   │   │   ├── DeviceManager.h   # WiFi, backend, identity
-│   │   │   │   └── Logger.h          # Debug logging
-│   │   │   ├── modules/
-│   │   │   │   ├── RelayModule.h     # Relay control with safety
-│   │   │   │   ├── SensorModule.h    # DHT, Ultrasonic, Analog
-│   │   │   │   ├── KeypadModule.h    # 4x4 matrix support
-│   │   │   │   ├── LCDModule.h       # I2C 16x2 / 20x4
-│   │   │   │   ├── OLEDModule.h      # SSD1306 (128x64)
-│   │   │   │   ├── BuzzerModule.h    # Audible alerts/melodies
-│   │   │   │   ├── RGBModule.h       # Multi-color LED control
-│   │   │   │   └── BlinkerModule.h   # Non-blocking LED flashing
-│   │   └── examples/
-│   │       ├── BasicRelay/           # Simple relay control
-│   │       ├── KeypadLock/           # Secure PIN door system
-│   │       ├── AlarmSystem/          # PIR-based security
-│   │       ├── WeatherStation/       # DHT IoT node
-│   │       ├── ParkingSensor/        # Proximity assistance
-│   │       └── BlinkNonBlocking/     # Efficient LED control
-│   └── platformio.ini       # PlatformIO configuration
-│
-├── backend/                 # Python FastAPI backend
-│   ├── app/
-│   │   ├── main.py          # FastAPI app entry point
-│   │   ├── core/
-│   │   │   ├── config.py    # Settings management
-│   │   │   └── database.py  # Async SQLAlchemy setup
-│   │   ├── models/
-│   │   │   └── device.py    # Database models
-│   │   ├── schemas/
-│   │   │   └── device.py    # Pydantic schemas
-│   │   ├── services/
-│   │   │   └── crud.py      # Database operations
-│   │   └── api/
-│   │       └── routes/
-│   │           ├── devices.py   # Device registration
-│   │           ├── commands.py # Command dispatch
-│   │           └── telemetry.py # Data ingestion
-│   ├── requirements.txt
-│   └── start_backend.sh
-│
-└── docs/                    # Documentation
-```
-
-## 💻 Usage Examples
-
-### Basic Relay Control
 ```cpp
 #define INTEGRALL_ENABLE_RELAY
+#include <Integrall.h>
+Integrall::System integrall;
+```
+
+---
+
+## 🔌 Hardware Ecosystem (17+ Modules)
+Integrall abstracts the complexity of these components into non-blocking, event-driven modules:
+
+| | | | |
+| :--- | :--- | :--- | :--- |
+| 🎚️ **Relays** | ⚡ **Power (INA219)** | 🔊 **Rich Audio (MP3)** | 📷 **ESP32-CAM** |
+| 🌡️ **Sensors (10+)** | ⏱️ **Time & GPS** | 🛡️ **Security Presets** | 🕹️ **Input UI** |
+| 📺 **LCD / OLED** | 📡 **Wireless (LoRa/BLE)** | 💾 **SD Storage** | ⚙️ **Stepper/Servo** |
+
+### Detailed Module Highlights
+1.  **Relay Logic**: Auto-off safety timeouts, interlock groups, and hardware button overrides.
+2.  **Display Hub**: Smart scrolling for LCD and hardware-accelerated progress bars for OLED.
+3.  **Sensor Engine**: Multi-sample averaging for HC-SR04, semantic motion sensing, and high-precision environmental monitoring (BME280).
+4.  **Security Auth**: Integrated matrix keypad support with password buffer and lockout management.
+5.  **Motion Control**: Non-blocking servo easing/sweeping and stepper rotation.
+6.  **Edge Vision**: MJPEG streaming server for ESP32-CAM with zero-boilerplate setup.
+
+---
+
+## 🚀 Quick Start (60 Seconds)
+
+### 1. Minimal Firmware Sketch
+```cpp
+#define INTEGRALL_ENABLE_RELAY
+#define INTEGRALL_ENABLE_LCD
 #include <Integrall.h>
 
 Integrall::System integrall;
 
 void setup() {
-    Integrall::DeviceConfig config;
-    config.wifi_ssid = "MyWiFi";
-    config.wifi_password = "secret";
-    config.backend_url = "http://192.168.1.100:8000";
-    config.api_key = "my-api-key";
-    
-    integrall.begin(config);
-    integrall.enableRelay(5);  // GPIO 5
+    integrall.begin();
+    int pump = integrall.enableRelay(5); 
+    integrall.lcdPrint("Pump Ready", 0, 0);
 }
 
 void loop() {
-    integrall.handle();
+    integrall.handle(); // Processes background logic/safety
 }
 ```
 
-### With Safety Features
-```cpp
-int relay = integrall.enableRelay(5, true, "Heater");
-integrall.relaySetTimeout(relay, 30000);     // Auto-off after 30s
-integrall.relaySetInterlock(relay, 1);     // Group 1 interlock
-integrall.relayAttachButton(relay, 4);      // Physical button on GPIO 4
-```
+### 2. Backend & Communication
+The Python backend (FastAPI) manages device registration, remote command dispatch, and telemetry. All communication is secured via `X-API-Key` authentication.
 
-### Send Telemetry
-```cpp
-StaticJsonDocument<256> doc;
-doc["temperature"] = 24.5;
-doc["humidity"] = 60;
-integrall.sendTelemetry(doc);
-```
-
-### High-Level Projects (The Integrall Way)
-```cpp
-// A complete 4-digit PIN lock system in setup() + loop()
-integrall.lockSetup("1234", door_relay_id); 
-void loop() { integrall.lockUpdate(); integrall.handle(); }
-```
-
-## 🔧 Configuration
-
-### Firmware (Compile-time)
-```cpp
-// In your sketch, BEFORE including Integrall.h:
-#define INTEGRALL_ENABLE_RELAY      // Enable relay module
-#define INTEGRALL_ENABLE_KEYPAD     // Enable keypad module
-#define INTEGRALL_ENABLE_LCD        // Enable LCD display
-#define INTEGRALL_ENABLE_OLED       // Enable OLED display
-#define INTEGRALL_ENABLE_SENSORS    // Enable DHT/Ultrasonic/Analog
-#define INTEGRALL_ENABLE_BUZZER     // Enable sound alerts
-#define INTEGRALL_ENABLE_RGB        // Enable multi-color LED
-#define INTEGRALL_DEBUG_LEVEL 2     // 0=none, 1=errors...
-
-#include <Integrall.h>
-```
-
-### Backend (Environment)
 ```bash
-# .env file
-DATABASE_URL=sqlite+aiosqlite:///./integrall.db
-API_KEY=your-secret-api-key
-SECRET_KEY=your-jwt-secret
-DEBUG=true
+cd backend
+./start_backend.sh  # Starts at http://localhost:8000
 ```
-
-## 📊 API Reference
-
-### Device Registration
-```http
-POST /api/devices/register
-X-API-Key: your-api-key
-
-{
-  "device_id": "INT_A1B2C3D4E5F6",
-  "ip_address": "192.168.1.105",
-  "mac_address": "A1:B2:C3:D4:E5:F6",
-  "firmware_version": "0.1.0"
-}
-```
-
-### Send Command
-```http
-POST /api/commands
-X-API-Key: your-api-key
-
-{
-  "device_id": "INT_A1B2C3D4E5F6",
-  "command_type": "relay_on",
-  "parameters": {"pin": 5, "safety_timeout_ms": 30000}
-}
-```
-
-### Poll Commands (Device)
-```http
-GET /api/devices/{device_id}/commands
-X-API-Key: your-api-key
-```
-
-### Submit Telemetry
-```http
-POST /api/telemetry
-X-API-Key: your-api-key
-
-{
-  "device_id": "INT_A1B2C3D4E5F6",
-  "data": {
-    "temperature": 24.5,
-    "relay_states": [true, false]
-  }
-}
-```
-
-## 🛡️ Safety Features
-
-Integrall includes multiple safety mechanisms:
-
-1. **Safety Timeouts** - Relays automatically turn off after specified duration
-2. **Interlock Groups** - Prevent simultaneous activation of conflicting relays
-3. **Debounced Inputs** - Hardware buttons use 50ms software debouncing
-4. **Memory Protection** - Compile-time module selection prevents bloat
-5. **API Key Auth** - All device endpoints require authentication
-6. **State Validation** - Commands validate device existence before queueing
-
-## 📈 Roadmap
-
-### v0.2 (In Progress - 90% Complete)
-- ✅ **Keypad module** (3x4, 4x4 matrix)
-- ✅ **OLED/LCD display modules**
-- ✅ **DHT & Ultrasonic sensors**
-- ✅ **High-level project APIs** (Lock, Alarm, etc.)
-- ✅ **Non-blocking core** (delay-free architecture)
-- 🔄 WebSocket real-time push
-- 🔄 OTA firmware updates
-
-### v0.3
-- 🔄 ESP8266 support
-- 🔄 MQTT support (optional)
-- 🔄 Voice integration hooks
-- 🔄 Modular library packages
-
-### v1.0
-- 🔄 Industrial features (fleet management)
-- 🔄 Role-based access control
-- 🔄 Cloud SaaS deployment
-- 🔄 PostgreSQL/MongoDB support
-
-## 🤝 Contributing
-
-Contributions welcome! Please read our [Contributing Guide](CONTRIBUTING.md).
-
-Areas where help is needed:
-- Additional hardware modules (sensors, actuators)
-- Frontend dashboard (React/Vue)
-- Documentation and tutorials
-- Testing and bug reports
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) file.
-
-## 🙏 Acknowledgments
-
-- FastAPI team for the excellent async web framework
-- PlatformIO team for professional embedded tooling
-- Arduino community for open-source hardware ecosystem
 
 ---
 
-**Built with ❤️ by Emmanuel TIGO and contributors**
+## 🌐 Connectivity & Data Flow
 
-*Simplify IoT. Focus on what matters.*
+```text
+                    ┌──────────────────────┐
+                    │  Developer Hub       │
+                    │  (React / Website)   │
+                    └──────────┬───────────┘
+                               │ Reference
+                               ▼
+                    ┌──────────────────────┐
+                    │   FastAPI Backend    │
+                    │   (Python / Database)│
+                    └──────────┬───────────┘
+                               │ HTTP REST API
+               ┌───────────────┼───────────────┐
+               ▼               ▼               ▼
+        ┌────────────┐  ┌────────────┐  ┌────────────┐
+        │  ESP32 #1  │  │  ESP32 #2  │  │  ESP32 #3  │
+        └────────────┘  └────────────┘  └────────────┘
+```
+
+---
+
+## 📖 Documentation
+Detailed guides are available in two formats:
+- **[Website & Live Docs](https://integrall-docs.vercel.app)**: Interactive tutorials, project showcases, and API search.
+- **[Local User Guide (GUIDE.md)](GUIDE.md)**: Full offline reference for every module and safety feature.
+- **[Install Guide (DEPENDENCIES.md)](DEPENDENCIES.md)**: Required libraries for various hardware modules.
+
+## 📉 Roadmap
+- [x] **v0.5 Core Modules**: LCD, OLED, Sensors, Relays, Buzzer, Blinker.
+- [x] **v0.8 Expansion**: Camera, Rich Audio, Input UI, Storage, Time/GPS, Power, Stepper.
+- [x] **Project Presets**: Smart Lock, Alarm System, Weather Station, Parking Sensor.
+- [ ] **v1.0 Final**: Fleet Management, OTA Updates, MQTT Broker Integration.
+
+## 🤝 Contributing
+Integrall is an open-source project. We welcome contributions for new hardware modules, bug fixes, and documentation improvements. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+---
+**Built with ❤️ for the IoT Community.**
+*Simplify the physical. Scale the digital.*
