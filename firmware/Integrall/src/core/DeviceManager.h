@@ -99,6 +99,10 @@ public:
     #if INTEGRALL_NETWORK_AVAILABLE
     bool sendTelemetry(const JsonDocument& data);
     bool sendCommandResponse(const char* command_id, bool success, const char* message = nullptr);
+    
+    // Easy HTTP API
+    String httpGet(const char* url);
+    int httpPost(const char* url, const char* payload, const char* contentType = "application/json");
     #endif
     
     // Configuration portal (WiFiManager integration point)

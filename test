@@ -1,0 +1,190 @@
+#define INTEGRALL_ENABLE_OLED
+#define INTEGRALL_ENABLE_WIFI
+#include <Integrall.h>
+#include <WebServer.h>
+
+Integrall::System integrall;
+WebServer server(80);
+
+#define BUTTON_PORT 12
+#define BUTTON_WEB  13
+
+// [Your Custom Animations Vars Stay Exactly the Same]
+const char spinnerChars[] = {'|', '/', '-', '\\'};
+int spinnerIndex = 0;
+int centerX = 64;
+int centerY = 32;
+int circleRadius = 28; 
+int dotRadius = 3; 
+float angleRadFast = 0.0;
+float angleRadSlow = PI; 
+float angleStepFast = 0.12;
+float slowSpeed = 0.06; 
+float slowSpeedVar = 0.03; 
+float slowSpeedAngle = 0.0; 
+
+enum Mode { MODE_NONE, MODE_PORT, MODE_WEB };
+Mode currentMode = MODE_NONE;
+
+const char* PY_SERVER_HOST = "192.168.1.100";
+const uint16_t PY_SERVER_PORT = 5000;
+
+unsigned long lastUpdateTime = 0;
+bool showingMessage = false;
+bool waitingForResult = false;
+unsigned long waitStartMs = 0;
+const unsigned long SCAN_TIMEOUT_MS = 120000;
+String lastResult = "(no results yet)";
+
+// We keep your ISR strategy exactly as you designed it
+volatile bool isrButtonWeb = false;
+volatile bool isrButtonPort = false;
+unsigned long lastTriggerMs = 0;
+const unsigned long TRIGGER_DEBOUNCE_MS = 1500UL;
+
+void IRAM_ATTR onWebISR() { isrButtonWeb = true; }
+void IRAM_ATTR onPortISR() { isrButtonPort = true; }
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUTTON_PORT, INPUT_PULLUP);
+  pinMode(BUTTON_WEB, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_WEB), onWebISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PORT), onPortISR, FALLING);
+
+  // 1. Integrall handles the raw Wire & I2C initialization
+  integrall.oled.begin(0x3C); 
+
+  bootSpinner();
+  showLogo();
+  chooseMode();
+
+  // 2. We keep the WebServer just to receive your custom callbacks
+  server.on("/update", handleUpdate);
+  server.begin();
+}
+
+void loop() {
+  // 3. Integrall Background Handler (Maintains WiFi silently)
+  integrall.handle();
+  server.handleClient();
+
+  if (currentMode == MODE_PORT && Serial.available()) {
+    lastResult = Serial.readStringUntil('\n');
+    lastResult.trim();
+    waitingForResult = false;
+    showMessage("Serial result: " + lastResult);
+  }
+
+  unsigned long now = millis();
+  if (isrButtonWeb && now - lastTriggerMs > TRIGGER_DEBOUNCE_MS) {
+    isrButtonWeb = false; lastTriggerMs = now;
+    if (currentMode == MODE_WEB) {
+      showTwoLines("Button pressed", "Triggering scan (WEB)...");
+      
+      // 4. One-Line HTTP Request using Integrall
+      String callback = "http://" + integrall.getIPAddress() + ":80/update";
+      String url = String("http://") + PY_SERVER_HOST + ":" + PY_SERVER_PORT + "/start_scan?callback=" + callback;
+      
+      String response = integrall.httpGet(url.c_str());
+      
+      if (response != "") {
+        showTwoLines("Started successfully!", "");
+      } else {
+        showTwoLines("Error contacting", PY_SERVER_HOST);
+      }
+      
+      waitingForResult = true;
+      waitStartMs = millis();
+    }
+  }
+
+  // PORT Mode trigger remains the same...
+  if (isrButtonPort && now - lastTriggerMs > TRIGGER_DEBOUNCE_MS) {
+    isrButtonPort = false; lastTriggerMs = now;
+    if (currentMode == MODE_PORT) {
+      showTwoLines("Button pressed", "Triggering scan (PORT)...");
+      Serial.println("START_SCAN");
+      waitingForResult = true;
+      waitStartMs = millis();
+    }
+  }
+
+  if (waitingForResult && millis() - waitStartMs > SCAN_TIMEOUT_MS) {
+    waitingForResult = false;
+    showTwoLines("Timeout waiting", "for scan result");
+  }
+
+  if (showingMessage && millis() - lastUpdateTime > 2500) showingMessage = false;
+  if (!showingMessage) animateCircularDots();
+  
+  delay(30);
+}
+
+void handleUpdate() {
+  if (server.hasArg("data")) {
+    lastResult = server.arg("data");
+    lastResult.replace("+", " "); // Decode string
+    waitingForResult = false;
+    showMessage("Scan result: " + lastResult);
+    server.send(200, "text/plain", "ok");
+  } else {
+    server.send(400, "text/plain", "missing data param");
+  }
+}
+
+// ==========================================
+// 🎨 ANIMATION LOGIC 
+// ==========================================
+// Integrall exposes `.getRaw()` so you can keep your complex
+// Adafruit_SSD1306 logic exactly as you wrote it!
+Adafruit_SSD1306* getDisplay() { return integrall.oled.getRaw(); }
+
+void drawCenteredText(const char* text, int textSize) {
+  int16_t x1, y1; uint16_t w, h;
+  getDisplay()->setTextSize(textSize);
+  getDisplay()->getTextBounds((char*)text, 0, 0, &x1, &y1, &w, &h);
+  getDisplay()->setCursor((128 - w) / 2, (64 - h) / 2);
+  getDisplay()->print(text);
+}
+
+void showTwoLines(const String &l1, const String &l2) {
+  getDisplay()->clearDisplay();
+  getDisplay()->setCursor(0, 10);
+  getDisplay()->println(l1);
+  getDisplay()->println(l2);
+  getDisplay()->display();
+}
+
+void chooseMode() {
+  getDisplay()->clearDisplay();
+  drawCenteredText("Choose Scan Mode", 1);
+  getDisplay()->setCursor(2, 52); getDisplay()->print("PORT Btn -> Serial");
+  getDisplay()->setCursor(2, 58); getDisplay()->print("WEB  Btn -> WiFi");
+  getDisplay()->display();
+
+  while (true) {
+    if (digitalRead(BUTTON_PORT) == LOW) {
+      currentMode = MODE_PORT;
+      showTwoLines("Mode:", "PORT (Serial)"); delay(700); break;
+    } else if (digitalRead(BUTTON_WEB) == LOW) {
+      currentMode = MODE_WEB;
+      showTwoLines("Mode:", "WEB (WiFi) -> Connecting...");
+      
+      // 5. Integrall WiFi Management
+      // Replaces 10 lines of while() loops and delay() checks!
+      integrall.begin(ssid, password);
+      
+      if (integrall.isOnline()) {
+        showTwoLines("WiFi connected:", integrall.getIPAddress());
+      } else {
+        showTwoLines("WiFi failed", "Check creds");
+      }
+      delay(800); break;
+    }
+    animateCircularDots();
+    delay(30);
+  }
+}
+
+// ... [The rest of your complex animation functions, such as animateCircularDots(), remain exactly the same but call getDisplay() instead of display.]

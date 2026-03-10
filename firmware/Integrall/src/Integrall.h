@@ -296,7 +296,13 @@ public:
     // LCD MODULE API (available if INTEGRALL_ENABLE_LCD is defined)
     // ========================================================================
     #if INTEGRALL_MODULE_LCD_ENABLED
-    
+    /**
+     * Initialize the LCD manually with custom dimensions
+     */
+    bool enableLCD(uint8_t address = 0x27, uint8_t cols = 16, uint8_t rows = 2) {
+        return _lcd_module.begin(address, cols, rows);
+    }
+
     /**
      * Print text to I2C LCD
      * @param text Text to display
@@ -1091,6 +1097,18 @@ public:
      * @param json_data JSON document with telemetry data
      */
     bool sendTelemetry(const JsonDocument& data);
+    
+    /**
+     * Perform an easy HTTP GET request
+     * @return Response string (empty if failed)
+     */
+    String httpGet(const char* url) { return _device_manager.httpGet(url); }
+
+    /**
+     * Perform an easy HTTP POST request 
+     * @return HTTP response code
+     */
+    int httpPost(const char* url, const char* payload) { return _device_manager.httpPost(url, payload); }
     #endif
 
     /**

@@ -130,6 +130,9 @@ weatherUpdate	KEYWORD2
 smartSwitchSetup	KEYWORD2
 smartSwitchUpdate	KEYWORD2
 enableEventLog	KEYWORD2
+enableLCD	KEYWORD2
+httpGet	KEYWORD2
+httpPost	KEYWORD2
 
 #######################################
 # Constants (LITERAL1)

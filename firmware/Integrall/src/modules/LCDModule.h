@@ -20,7 +20,7 @@ namespace Integrall {
 class LCDModule {
 public:
     LCDModule() : _lcd(nullptr), _initialized(false) {
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 4; i++) {
             _row_text[i] = "";
             _scroll_pos[i] = 0;
             _last_scroll[i] = 0;
@@ -52,7 +52,7 @@ public:
      * If short, it prints static text. If long, it starts scrolling in the loop.
      */
     void print(const char* text, uint8_t col = 0, uint8_t row = 0) {
-        if (!_initialized || row >= 2) return;
+        if (!_initialized || row >= 4) return;
         
         String input = String(text);
         
@@ -178,9 +178,9 @@ private:
     LiquidCrystal_I2C* _lcd;
     bool _initialized;
     uint8_t _cols, _rows;
-    String _row_text[2];
-    int _scroll_pos[2];
-    unsigned long _last_scroll[2];
+    String _row_text[4];
+    int _scroll_pos[4];
+    unsigned long _last_scroll[4];
 };
 
 } // namespace Integrall

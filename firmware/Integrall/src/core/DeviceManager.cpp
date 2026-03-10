@@ -330,12 +330,44 @@ bool DeviceManager::stopConfigPortal() {
 }
 #endif
 
-#if INTEGRALL_NETWORK_AVAILABLE
 void DeviceManager::reconnect() {
     if (_state == DeviceState::DISCONNECTED || _state == DeviceState::ERROR) {
         _setState(DeviceState::CONNECTING_WIFI);
         WiFi.reconnect();
     }
+}
+
+String DeviceManager::httpGet(const char* url) {
+    #if INTEGRALL_NETWORK_AVAILABLE
+    #if defined(ESP32)
+    _http.begin(url);
+    #else
+    _http.begin(_wifiClient, url);
+    #endif
+    
+    int code = _http.GET();
+    String res = "";
+    if (code == 200) res = _http.getString();
+    _http.end();
+    return res;
+    #endif
+    return "";
+}
+
+int DeviceManager::httpPost(const char* url, const char* payload, const char* contentType) {
+    #if INTEGRALL_NETWORK_AVAILABLE
+    #if defined(ESP32)
+    _http.begin(url);
+    #else
+    _http.begin(_wifiClient, url);
+    #endif
+    
+    _http.addHeader("Content-Type", contentType);
+    int code = _http.POST(payload);
+    _http.end();
+    return code;
+    #endif
+    return -1;
 }
 #endif
 
