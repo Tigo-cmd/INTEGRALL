@@ -1,10 +1,10 @@
-# 📖 Integrall Framework: User Guide
+# Integrall Framework: User Guide
 
-Welcome to the **Integrall** documentation. This guide is updated in real-time as the framework evolves to help you build fast, safe, and powerful IoT projects.
+Welcome to the **Integrall** documentation. This guide covers every module and API available in the framework.
 
 ---
 
-## 🛠️ Getting Started (The "Integrall" Way)
+## Getting Started (The "Integrall" Way)
 The philosophy of Integrall is **Complexity Abstraction**. We hide the "ugly" setup so you can write logic in one line.
 
 ### 1. Minimal Sketch Structure (Offline Mode)
@@ -26,18 +26,25 @@ If you need connectivity, you **MUST** enable it explicitly BEFORE including the
 #include <Integrall.h>
 ```
 
+### 3. Smart Printing
+Tired of `Serial.print` and `Serial.println` spanning over 5 lines just to print a variable? Use Integrall's C-style formatting! It only runs if your Debug Level is > 0.
+```cpp
+int angle = 90;
+integrall.println("Moving the servo to exactly %d degrees!", angle);
+```
+
+
 ---
 
-## 🌐 Connectivity & Cloud
+## Connectivity & Cloud
 
-Integrall handles the complexity of WiFi reconnections and Backend synchronization. You can provide credentials in two ways:
+Integrall handles the complexity of WiFi reconnections. You can provide WiFi credentials in two ways:
 
 ### 1. Global (The "Set and Forget" way)
 Best for regular development. Edit `Integrall/src/config/IntegrallConfig.h`:
 ```cpp
 #define INTEGRALL_DEFAULT_SSID     "YourWifiName"
 #define INTEGRALL_DEFAULT_PASS     "YourWifiPassword"
-#define INTEGRALL_DEFAULT_BACKEND  "http://YourIp:8000"
 ```
 In your sketch, you just write:
 ```cpp
@@ -51,38 +58,48 @@ void setup() {
     Integrall::DeviceConfig config;
     config.wifi_ssid = "SecretNetwork";
     config.wifi_password = "Password123";
-    config.backend_url = "http://api.integrall.io";
-    config.api_key = "your-key";
-    
+
     integrall.begin(config);
 }
 ```
 
-> [!IMPORTANT]
-> **Manual Config** still requires `#define INTEGRALL_ENABLE_WIFI` at the top of your sketch to activate the networking hardware!
+> **IMPORTANT:** Manual Config still requires `#define INTEGRALL_ENABLE_WIFI` at the top of your sketch to activate the networking hardware!
 
 ---
 
-## 🔌 Hardware Modules
+## Hardware Modules
 
 ### 1. LCD Display (I2C)
 Hides all the `Wire.h` and address management, while offering dynamic features.
 - **Setup**: `#define INTEGRALL_ENABLE_LCD`
 - **Commands**:
-  - `integrall.lcdPrint("Text", col, row);` - Direct printing. Wait... if you send a long string (e.g., >16 chars), Integrall will **automatically** scroll it for you!
+  - `integrall.lcdPrint("Text", col, row);` - Direct printing. If you send a long string (e.g., >16 chars), Integrall will **automatically** scroll it for you.
   - `integrall.lcdClear();` - Clear the screen.
   - `integrall.lcdScrollText("Long Text", row, speed_ms);` - Force professional non-blocking scrolling on a specific row.
   - `integrall.lcdCursor(true, true);` - Show a blinking cursor.
   - `integrall.lcdCreateChar(0, myHeartArr);` - Easily draw custom symbols like batteries or hearts.
+  - `integrall.lcdBacklight(true);` - Control backlight on/off.
 
 ### 2. Servo Motors
-Works identically on **ESP32** and **Arduino Uno/Nano** (auto-swaps hardware timers).
+Works identically on **ESP32** and **Arduino Uno/Nano** (auto-swaps hardware timers). Supports up to 4 concurrent servos.
 - **Setup**: `#define INTEGRALL_ENABLE_SERVO`
-- **Commands**:
-  - `integrall.enableServo(pin);` - Attach the physical GPIO pin.
-  - `integrall.setServo(angle);` - Move motor precisely to angle (0-180).
-  - `integrall.setServoFromAnalog(analog_pin);` - The "Potentiometer Trick". Automatically maps an analog twist knob (0-100%) to the motor angle (0-180) in one line.
-  - `integrall.sweepServo(speed_ms);` - **Non-blocking** sweep. Put this in your `loop()` and the motor moves back and forth automatically without freezing your other code!
+- **Commands (Single Servo)**:
+  - `integrall.enableServo(pin, start_angle);` - Attach the physical GPIO pin, and optionally set a starting angle instantly.
+  - `integrall.setServo(angle);` - Move motor precisely to angle (0-180) instantly.
+  - `integrall.easeServo(angle, delay_ms);` - Super smooth, non-blocking ease to an angle. Motor slowly rotates in the background while your code keeps running.
+  - `integrall.setServoFromAnalog(analog_pin);` - The "Potentiometer Trick". Automatically maps an analog twist knob (0-100%) to motor angle.
+  - `integrall.sweepServo(speed_ms);` - **Non-blocking** sweep. Put this in your `loop()` and the motor automatically sweeps back and forth.
+
+- **Commands (Multi-Servo)**:
+  If you have more than one motor, `enableServo` returns an ID/index. You can use this ID as the **FIRST parameter** in any servo command to control them independently.
+  ```cpp
+  int arm = integrall.enableServo(10);
+  int claw = integrall.enableServo(11);
+
+  integrall.setServo(arm, 90);
+  integrall.easeServo(claw, 180, 15);
+  ```
+
 ### 3. Sensors (Ultrasonic, PIR, Analog)
 No more complex math or timing logic.
 - **Setup**: `#define INTEGRALL_ENABLE_SENSORS`
@@ -91,20 +108,26 @@ No more complex math or timing logic.
   - `bool near = integrall.isNear(trig, echo, threshold_cm);` - One-liner proximity alert. Returns `true` if an object is closer than the threshold.
   - `int light = integrall.readLightPercent(A0);` - Read LDR light intensity.
   - `int raw = integrall.readAnalogPercent(A0);` - Returns a clean 0-100% value from any analog sensor.
-  - `bool motion = integrall.isTriggered(PIR_PIN);` - Simple true/false trigger for motion sensors.
+  - `bool motion = integrall.motionDetected(PIR_PIN);` - Semantic motion sensing.
+  - `float waterTemp = integrall.readProbeTemp(PROBE_PIN);` - Read DS18B20 waterproof sensors. *(Requires DallasTemperature library)*
+  - `float t, h, p; integrall.readEnvironment(addr, t, h, p);` - High-precision BME280 monitoring. *(Requires Adafruit_BME280 library)*
+  - `float t = integrall.readTemperature(pin, type);` - DHT temperature reading. *(Requires DHT library)*
+  - `float h = integrall.readHumidity(pin, type);` - DHT humidity reading. *(Requires DHT library)*
 
 ### 4. Smart Relays
 Standard relay control with professional safety features.
 - **Setup**: `#define INTEGRALL_ENABLE_RELAY`
 - **Key Features**:
-  - `integrall.enableRelay(pin, active_low, "Name");` - Initialize a relay.
+  - `integrall.enableRelay(pin, active_low, "Name");` - Initialize a relay. Returns an index for subsequent operations.
   - `integrall.relayOn(index);` / `integrall.relayOff(index);` / `integrall.relayToggle(index);` - Control.
+  - `integrall.setRelay(index, true, alert);` - Set relay state directly, with optional buzzer alert.
   - `integrall.relaySetTimeout(index, 30000);` - **Auto-off** safety timer (30 seconds).
   - `integrall.relaySetInterlock(index, group);` - Prevent two relays in the same group turning on simultaneously (safety).
-
   - `integrall.relayAttachButton(index, pin);` - Attach a physical button to a relay (hardware override).
+  - `integrall.relayIsOn(index);` - Check relay state.
+  - `integrall.allRelaysOff();` - Emergency off for all relays.
 
-### 5. Matrix Keypad & Auto-Lock System
+### 5. Matrix Keypad
 Hides row/column scanning and debounce logic completely.
 - **Setup**: `#define INTEGRALL_ENABLE_KEYPAD`
 - **Core Commands**:
@@ -112,14 +135,7 @@ Hides row/column scanning and debounce logic completely.
   - `char k = integrall.keypadGetKey();` - Read the currently pressed key (raw).
   - `integrall.keypadCapture(maxLen);` - Build a string from keypresses. `*` = Backspace, `#` = Enter.
   - `integrall.keypadCheckPin("1234");` - Validate string against a PIN. Clears buffer automatically.
-
-- **The "Auto-Lock" System**:
-  Why write 100 lines of `if/else` logic for a PIN lock? Just tell Integrall your password and the Relay you want to open:
-  ```cpp
-  // PIN, relay index, unlock duration ms, max wrong tries
-  integrall.lockSetup("1234", doorRelay, 5000, 3);
-  ```
-  Then, put `integrall.lockUpdate();` in your `loop()`. Integrall will automatically scan keys, print asterisks `*` to the LCD, handle backspaces, check the PIN, open the door, and lock out hackers!
+  - `integrall.keypadClear();` - Clear the input buffer.
 
 ### 6. OLED Display (SSD1306)
 Native I2C OLED support with text, values, and progress bars.
@@ -136,8 +152,10 @@ Supports single beeps, patterns, and ready-to-use alerts.
 - **Commands**:
   - `integrall.enableBuzzer(pin);` - Initialize.
   - `integrall.buzzerBeep(ms);` - Single beep.
+  - `integrall.buzzerPattern(count, on_ms, off_ms);` - Custom beep pattern.
   - `integrall.buzzerAlert();` - Triple rapid beep for danger/alarm.
   - `integrall.buzzerSuccess();` / `integrall.buzzerFail();` - Melodic feedback.
+  - `integrall.buzzerOff();` - Silence.
 
 ### 8. RGB LED
 Control multi-color LEDs with named colors or RGB values.
@@ -147,12 +165,14 @@ Control multi-color LEDs with named colors or RGB values.
   - `integrall.setColor("blue");` - Set by name (red, green, blue, yellow, cyan, white, purple, orange).
   - `integrall.setRGB(r, g, b);` - Custom color balance.
   - `integrall.rgbBlink(r, g, b, ms);` - **Non-blocking** color blink.
+  - `integrall.rgbOff();` - Turn off.
 
 ### 9. ESP32-CAM Video Stream
 Professional MJPEG streaming with zero boilerplate.
 - **Setup**: `#define INTEGRALL_ENABLE_CAMERA`
-- **Pick your Board**: Simply define your model at the **very top** of your sketch (e.g., `#define CAMERA_MODEL_AI_THINKER`).
-- **Supported Models**: AI-Thinker, Wrover Kit, ESP-EYE, M5Stack (all versions), TTGO T-Journal, Xiao ESP32S3, and more.
+- **Requires**: `#define INTEGRALL_ENABLE_WIFI` (Camera will be disabled without WiFi)
+- **Pick your Board**: Define your model at the **very top** of your sketch (e.g., `#define CAMERA_MODEL_AI_THINKER`). If none is defined, AI-Thinker is used by default.
+- **Supported Models**: AI-Thinker, Wrover Kit, ESP-EYE, M5Stack (all versions), TTGO T-Journal, Xiao ESP32S3, DFRobot FireBeetle2/Romeo, and more.
 - **Commands**:
   - `integrall.enableCamera();` - Inits hardware and **auto-starts** a web server on Port 81 as soon as WiFi connects.
   - `const char* url = integrall.getCameraStreamURL();` - Get the link to your live video feed.
@@ -160,59 +180,121 @@ Professional MJPEG streaming with zero boilerplate.
 
 **Smart Memory Management**: Integrall automatically detects if your board has **PSRAM**. If it does, it enables High-Quality UXGA (1600x1200) streaming. If not, it safely downscales to prevent crashes.
 
-> [!NOTE]
-> **Backend Status**: Cloud backend features are currently **DISCONNECTED** by default in this version to focus on local library reliability. Telemetry and remote commands are disabled.
-
-**Why use this?** A standard ESP32-CAM sketch is over 200 lines of complex pin mapping and HTTP handling. Integrall reduces this to **one line**.
-
 ### 10. Non-Blocking Blinker
-The ultimate replacement for the "Blink" example. No `delay()` needed.
+The ultimate replacement for the "Blink" example. No `delay()` needed. Always available (no enable flag required).
 - **Commands**:
   - `integrall.blink(pin, interval);` - Start blinking in the background.
   - `integrall.stopBlink();` - Stop the blinking.
 
 **Why use this?** Traditional `delay(1000)` freezes your ESP32. With `integrall.blink()`, your LED flashes while your WiFi and sensors keep working perfectly.
 
-**Example – Sensor Dashboard:**
-```cpp
-void loop() {
-    float dist = integrall.readDistance(5, 6);
-    integrall.oledPrint("Distance:", 0, 0, true);
-    integrall.oledPrintValue("cm: ", dist, 1);
-    integrall.oledBar(integrall.getWiFiStrength() + 100); // Signal bar
-}
-```
+### 11. Rich Audio (MP3 & Voice)
+Play high-fidelity sound effects or voice alerts via MicroSD.
+- **Setup**: `#define INTEGRALL_ENABLE_AUDIO`
+- **Commands**:
+  - `integrall.audioBeginDF(Serial2, rx, tx);` - Start DFPlayer on Serial2. *(Requires DFRobotDFPlayerMini library)*
+  - `integrall.audioPlay(track);` - Start specific MP3.
+  - `integrall.audioVolume(25);` - Set volume (0-30).
+  - `integrall.audioSoundLevel(pin);` - Read microphone/sound level (ESP32 only).
+
+### 12. Input UI & Auth
+Unified interaction for buttons, encoders, joysticks, and more.
+- **Setup**: `#define INTEGRALL_ENABLE_INPUT`
+- **Commands**:
+  - `integrall.inputButtonPressed(pin, activeLow);` - Debounced button press.
+  - `integrall.inputReadJoystick(pin, center, deadzone);` - Normalized joystick axis (-100 to 100).
+  - `integrall.inputTouchActive(pin);` - Capacitive touch detection.
+  - `integrall.inputReadEncoder(clk, dt);` - Rotary encoder direction.
+  - `String card = integrall.inputReadRFID(ss, rst);` - Get MFRC522 UID. *(Requires MFRC522 library)*
+  - `uint32_t code = integrall.inputReadIR(pin);` - Parse IR remote codes. *(Requires IRremote library)*
+
+### 13. Storage & SD Logging
+Persistent data capture for industrial or weather monitoring.
+- **Setup**: `#define INTEGRALL_ENABLE_STORAGE`
+- **Commands**:
+  - `integrall.storageBeginEEPROM(size);` - Initialize EEPROM with given size.
+  - `integrall.storageWriteInt(addr, val);` - Store setting in EEPROM.
+  - `integrall.storageReadInt(addr);` - Read setting from EEPROM.
+  - `integrall.storageLog("/log.txt", "Update", cs);` - Append to SD card file. *(Requires SD library)*
+  - `integrall.storageDelete("/log.txt");` - Delete SD card file. *(Requires SD library)*
+
+### 14. Time & GPS
+NTP synchronization and RTC support.
+- **Setup**: `#define INTEGRALL_ENABLE_TIME`
+- **Commands**:
+  - `integrall.timeSetupNTP("pool.ntp.org", gmt, dst);` - Sync clock via internet (ESP32/ESP8266 only).
+  - `integrall.timeIsSynced();` - Check if NTP sync is done (ESP32/ESP8266 only).
+  - `integrall.timeBeginRTC();` - Initialize DS3231 RTC. *(Requires RTClib)*
+  - `String t = integrall.timeGetStr();` - Get current HH:MM:SS from RTC. *(Requires RTClib)*
+  - `String iso = integrall.timeGetISO();` - Get ISO 8601 datetime from RTC. *(Requires RTClib)*
+  - `float lat, lng; integrall.timeGetGPS(Serial2, lat, lng);` - Real-time location. *(Requires TinyGPS++ library)*
+
+### 15. Wireless (BLE / LoRa)
+Go beyond WiFi for long-range or mobile-to-device communication.
+- **Setup**: `#define INTEGRALL_ENABLE_COMM`
+- **Commands**:
+  - `integrall.commBeginBLE("MyNode");` - Start Bluetooth Advertising. *(Requires BLE libraries, ESP32 only)*
+  - `integrall.commUpdateBLE(value);` - Update BLE characteristic value.
+  - `integrall.commBeginLoRa(868E6);` - Start Radio transmission. *(Requires LoRa library)*
+  - `integrall.commPushLoRa("payload");` - Send LoRa packet.
+
+### 16. Power & Battery
+Monitor energy budget and optimize for longevity.
+- **Setup**: `#define INTEGRALL_ENABLE_POWER`
+- **Commands**:
+  - `integrall.powerBeginINA(address);` - Initialize INA219 current sensor. *(Requires Adafruit_INA219 library)*
+  - `float v = integrall.powerGetVoltage();` - Bus voltage.
+  - `float ma = integrall.powerGetCurrent();` - Current draw.
+  - `float mw = integrall.powerGetPower();` - Power consumption.
+  - `int pct = integrall.powerGetBattery(voltage);` - Battery percentage estimate.
+  - `integrall.powerDeepSleep(600);` - Enter deep sleep for 10 minutes.
+
+### 17. Stepper Control
+Precise 4-wire motor rotation.
+- **Setup**: `#define INTEGRALL_ENABLE_STEPPER`
+- **Commands**:
+  - `integrall.stepperBegin(stepsPerRev, p1, p2, p3, p4);` - Initialize motor.
+  - `integrall.stepperSpeed(rpm);` - Set rotation speed.
+  - `integrall.stepperStep(steps);` - Move by step count.
+  - `integrall.stepperMove(degrees);` - Rotate by degrees.
 
 ---
 
-## 🔐 High-Level Lock System
+## High-Level Project Systems
+
+### PIN Lock System
 The most powerful feature of Integrall — a complete PIN-code lock system in **2 function calls**.
 
 **Requires**: `INTEGRALL_ENABLE_KEYPAD` + `INTEGRALL_ENABLE_RELAY`
 **Optional**: Add `INTEGRALL_ENABLE_LCD` for automatic feedback messages.
 
-### What it handles automatically:
+#### What it handles automatically:
 | Feature | Automatic |
 | :--- | :---: |
-| Asterisk display as user types | ✅ |
-| Backspace (`*`) and Submit (`#`) | ✅ |
-| "Unlocked" / "Access Denied" messages | ✅ |
-| Remaining attempts counter on LCD | ✅ |
-| Lockout after N wrong attempts | ✅ |
-| Auto-lock relay after unlock duration | ✅ |
+| Asterisk display as user types | Yes |
+| Backspace (`*`) and Submit (`#`) | Yes |
+| "Unlocked" / "Access Denied" messages | Yes |
+| Remaining attempts counter on LCD | Yes |
+| Lockout after N wrong attempts | Yes |
+| Auto-lock relay after unlock duration | Yes |
 
-### Setup (one call in `setup()`):
+#### Setup (one call in `setup()`):
 ```cpp
 // lockSetup(pin, relayIndex, unlockDuration_ms, maxWrongAttempts)
 integrall.lockSetup("1234", door, 5000, 3);
 ```
 
-### Run (one call in `loop()`):
+#### Run (one call in `loop()`):
 ```cpp
 integrall.lockUpdate(); // Handles EVERYTHING
 ```
 
-### Complete Sketch (the whole project!):
+#### Reset lockout:
+```cpp
+integrall.lockReset(); // Clears attempt counter and lockout state
+```
+
+#### Complete Sketch:
 ```cpp
 #define INTEGRALL_ENABLE_KEYPAD
 #define INTEGRALL_ENABLE_LCD
@@ -236,16 +318,16 @@ void loop() {
 }
 ```
 
-
-### 🚨 Alarm System
+### Alarm System
 A professional security system with PIR motion detection, cooldown safety, and sound/light alerts.
 - **Requires**: `INTEGRALL_ENABLE_SENSORS` + `INTEGRALL_ENABLE_RELAY`
+- **Optional**: `INTEGRALL_ENABLE_BUZZER` for audio alerts, `INTEGRALL_ENABLE_LCD` for status display
 ```cpp
 void setup() {
     integrall.begin();
     int siren = integrall.enableRelay(13, true, "Siren");
-    // setupAlarm(pirPin, relayIndex, cooldownMs)
-    integrall.alarmSetup(19, siren, 10000); 
+    // alarmSetup(pirPin, relayIndex, cooldownMs)
+    integrall.alarmSetup(19, siren, 10000);
 }
 
 void loop() {
@@ -254,9 +336,10 @@ void loop() {
 }
 ```
 
-### 🚗 Parking Sensor
+### Parking Sensor
 Visual and audible distance assistance for garages or robots.
-- **Requires**: `INTEGRALL_ENABLE_SENSORS` + `INTEGRALL_ENABLE_LCD` (or OLED)
+- **Requires**: `INTEGRALL_ENABLE_SENSORS`
+- **Optional**: `INTEGRALL_ENABLE_LCD` for distance display, `INTEGRALL_ENABLE_BUZZER` for proximity beeps
 ```cpp
 void setup() {
     integrall.begin();
@@ -270,31 +353,33 @@ void loop() {
 }
 ```
 
-### 🌡️ Weather Station
-Monitors temperature and humidity with automatic LCD updates and IoT logging.
-- **Requires**: `INTEGRALL_ENABLE_SENSORS` (with DHT library)
+### Weather Station
+Monitors temperature and humidity with automatic LCD updates.
+- **Requires**: `INTEGRALL_ENABLE_SENSORS` (with DHT library installed)
+- **Optional**: `INTEGRALL_ENABLE_LCD` for live readings display
 ```cpp
 void setup() {
     integrall.begin();
     // weatherSetup(dhtPin, dhtType, intervalSeconds)
-    integrall.weatherSetup(4, 22, 30); 
+    integrall.weatherSetup(4, 22, 30);
 }
 
 void loop() {
-    integrall.weatherUpdate(); // Reads on interval, updates LCD, sends to cloud
+    integrall.weatherUpdate(); // Reads on interval, updates LCD
     integrall.handle();
 }
 ```
 
-### 💡 Smart Switch
+### Smart Switch
 Motion-activated lighting with automatic timeout.
 - **Requires**: `INTEGRALL_ENABLE_RELAY` + `INTEGRALL_ENABLE_SENSORS`
+- **Optional**: `INTEGRALL_ENABLE_LCD` for status display
 ```cpp
 void setup() {
     integrall.begin();
     int light = integrall.enableRelay(13, true, "Light");
     // smartSwitchSetup(relayIndex, pirPin, autoOffSeconds)
-    integrall.smartSwitchSetup(light, 19, 60); 
+    integrall.smartSwitchSetup(light, 19, 60);
 }
 
 void loop() {
@@ -303,30 +388,20 @@ void loop() {
 }
 ```
 
-
 ---
 
-## 🚀 The Universal IoT Foundation
+## The Universal IoT Foundation
 Integrall is designed to be the **"OS" for your project**. Instead of just giving you "canned" projects like a Lock or Alarm, it provides a foundation that simplifies **every** line of code you write, whether you are building a Robot, a Bluetooth device, or an AI monitor.
 
 ### 1. Replaces the "Millis() Headache"
 Most IoT projects break when you use `delay()`. Integrall provides non-blocking logic as a standard:
-- ❌ **Standard**: `if (millis() - pM > interval) { ... }`
-- ✅ **Integrall**: `integrall.blink(pin, interval);` or `integrall.sweepServo(pin, speed);`
+- **Standard**: `if (millis() - pM > interval) { ... }`
+- **Integrall**: `integrall.blink(pin, interval);` or `integrall.sweepServo(speed);`
 
-### 2. Standardized Cloud bridge for ANY data
-You don't need a special Integrall library for your sensor to send it to the cloud.
-```cpp
-// Works for any variable or sensor!
-StaticJsonDocument<64> data;
-data["co2"] = mySpecialSensor.read(); 
-integrall.sendTelemetry(data);
-```
-
-### 3. The Responsive Background
+### 2. The Responsive Background
 Normal WiFi code makes your loop "stutter." Integrall's `handle()` runs in background "slices," ensuring your physical buttons and local logic stay lightning-fast while the network stays connected.
 
-### 4. Bridge Any Input (Bluetooth, Serial, Web)
+### 3. Bridge Any Input (Bluetooth, Serial, Web)
 You can use Integrall modules to respond to any external trigger:
 ```cpp
 if (Bluetooth.available()) {
@@ -335,89 +410,50 @@ if (Bluetooth.available()) {
 ```
 
 ---
----
 
-## 🌐 The Python Backend & Security
+## Networking & Utility Methods
 
-Integrall includes a professional-grade **FastAPI** backend that acts as the "Brain" for your devices. 
+These are available when WiFi is enabled (`#define INTEGRALL_ENABLE_WIFI`):
 
-### 1. How the Backend Works
-The backend creates a central point for all your ESP32s. Instead of you connecting directly to each ESP32, you connect to the **Backend**, and the backend manages the devices for you.
-
-*   **Port 5000/8000**: The backend runs on your computer or a server.
-*   **Database**: Every device registration, sensor reading, and command is logged in `integrall.db`.
-
-### 2. The API Key (X-API-Key)
-Security is built into the core. Every request the ESP32 makes must include a valid **API Key** in the header. If the key doesn't match, the server will reject the request with a `401 Unauthorized` error.
-
-**Setup Security**:
-1.  **Backend side**: Edit `backend/.env` and set `API_KEY=your_secret_string`.
-2.  **Firmware side**: Set `config.api_key = "your_secret_string"` in your sketch.
-
-### 3. Enabling the Connection
-To keep the framework lightweight, backend synchronization is **OPTIONAL**. 
-
-To enable it, you must toggle the flag in `Integrall/src/core/DeviceManager.h`:
-```cpp
-#define INTEGRALL_BACKEND_ENABLED 1  // Set to 1 to enable cloud sync
-```
-
-### 4. Basic Backend Sketch
-```cpp
-#define INTEGRALL_ENABLE_CAMERA
-#include <Integrall.h>
-
-void setup() {
-    Integrall::DeviceConfig config;
-    config.wifi_ssid     = "WiFi_Name";
-    config.wifi_password = "Password";
-    config.backend_url   = "http://192.168.1.XX:5000"; // Your PC's IP
-    config.api_key       = "my_key_123";
-    
-    integrall.begin(config);
-    integrall.enableCamera();
-}
-
-void loop() {
-    integrall.handle(); // This pulls commands and sends data to backend
-}
-```
+- `integrall.isOnline()` - Check if system is fully online.
+- `integrall.isWiFiConnected()` - Check WiFi connection status.
+- `integrall.getDeviceId()` - Get unique device ID (based on MAC address).
+- `integrall.getIPAddress()` - Get assigned IP address.
+- `integrall.getWiFiStrength()` - Get WiFi signal strength (RSSI).
+- `integrall.getStatusString()` - Get current system state as string.
+- `integrall.reconnect()` - Force reconnection.
+- `integrall.httpGet(url)` - Perform HTTP GET request.
+- `integrall.httpPost(url, payload)` - Perform HTTP POST request.
+- `integrall.enableEventLog(enabled)` - Enable/disable automatic event logging.
 
 ---
 
-## 🧠 Core Engineering: How it works "Under the Hood"
+## Cloud Backend (Under Development)
 
-Integrall uses a professional-grade **DeviceManager** to handle the complex networking tasks that usually make IoT development difficult.
-
-### 1. Zero-Config Identity
-The framework automatically generates a unique `Device ID` for you based on your ESP32's hardware MAC address (e.g., `INT_A1B2C3D4E5F6`). 
-- **User benefit**: You don't have to manually name every device. Just plug it in, and it appears on your dashboard with its own identity.
-
-### 2. The Smart State Machine
-Integrall automatically moves your device through several states without you writing any code:
-1. **WIFI_STA**: Reaches out to your router.
-2. **REGISTERING**: Handshakes with your FastAPI server to introduce itself.
-3. **ONLINE**: Fully ready and listening for remote commands.
-4. **RECONNECTING**: If your router restarts, Integrall automatically detects the "Disconnected" event and tries to reconnect every 10 seconds.
-
-### 3. Background Polling
-In the `integrall.handle()` function, the framework periodically "asks" the backend if there are any commands (like "Turn Light ON"). 
-- **Efficiency**: It uses a non-blocking timer, meaning your physical button presses and sensor readings are never slowed down by network activity.
+> **NOTE:** The Python/FastAPI cloud backend is currently **under active development** and is not yet included in the distribution. The firmware-side networking code (WiFi, device registration, telemetry) is fully implemented and functional — but there is no backend server available to connect to at this time.
+>
+> Planned backend features include:
+> - Device registration and management dashboard
+> - Telemetry data collection and storage
+> - Remote command dispatch
+> - API key authentication
+>
+> When the backend is ready, the firmware's existing `sendTelemetry()`, `httpGet()`, and `httpPost()` methods will connect seamlessly. No firmware changes will be required.
 
 ---
 
-## 🧪 Quick Reference: One-Liners vs Standard
+## Quick Reference: One-Liners vs Standard
 | Feature | Standard Arduino | Integrall Way |
 | :--- | :--- | :--- |
 | **LCD Setup** | 5 lines (Wire, addr, init, backlight) | `integrall.begin();` |
-| **Pot to Servo** | 3 lines (`analogRead`, `map`, `write`) | `integrall.setServoFromAnalog(9, A0);` |
-| **Ultrasonic** | ~15 lines (pulsem, timing math) | `integrall.readDistance(5, 6);` |
+| **Pot to Servo** | 3 lines (`analogRead`, `map`, `write`) | `integrall.setServoFromAnalog(A0);` |
+| **Ultrasonic** | ~15 lines (pulse, timing math) | `integrall.readDistance(5, 6);` |
 | **Blink LED** | 4 lines + `delay(1000)` (Freezes) | `integrall.blink(2, 500);` |
 | **Safely Delay** | `delay(1000)` (Freezes everything) | *Automatically Non-blocking* |
 
 ---
 
-## 🐞 Support & Troubleshooting
+## Support & Troubleshooting
 1. **Highlighting**: If your code is all black, make sure you have the `keywords.txt` file in your library folder.
 2. **Library Missing**: If `ArduinoJson.h` is missing, use the Library Manager to install it.
 3. **ESP32 Issues**: Make sure to install the `ESP32Servo` library for the best performance.
