@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Integrall — IoT Development, Simplified</title>
+  <meta name="description" content="An Arduino framework that turns complex IoT hardware integrations into one-line function calls. ESP32, ESP8266, and Arduino — with an optional cloud backend.">
+  <meta name="keywords" content="IoT, ESP32, Arduino, framework, relay, LCD, servo, sensors, keypad, camera, FastAPI">
+  <meta name="author" content="Emmanuel TIGO">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="Integrall — IoT Development, Simplified">
+  <meta property="og:description" content="Build IoT projects in minutes, not days. One-line hardware control with an optional cloud backend.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://integrall.io">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Integrall — IoT Development, Simplified">
+  <meta name="twitter:description" content="Build IoT projects in minutes, not days. One-line hardware control with an optional cloud backend.">
+
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+
+  <!-- ========== NAVIGATION ========== -->
+  <nav class="nav" role="navigation" aria-label="Main navigation">
+    <div class="container">
+      <a href="#" class="nav-logo">INTEGRALL</a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#modules">Modules</a>
+        <a href="#projects">Projects</a>
+        <a href="#install">Install</a>
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode">🌙</button>
+        <a href="#install" class="nav-cta">Get Started</a>
+      </div>
+      <button class="mobile-toggle" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Mobile Nav Overlay -->
+  <div class="mobile-nav">
+    <button class="mobile-close" aria-label="Close menu">&times;</button>
+    <a href="#features">Features</a>
+    <a href="#modules">Modules</a>
+    <a href="#projects">Projects</a>
+    <a href="#install">Install</a>
+    <button class="theme-toggle" onclick="document.getElementById('theme-toggle').click()">Toggle Theme</button>
+  </div>
+
+  <!-- ========== HERO ========== -->
+  <section class="hero">
+    <div class="hero-grid"></div>
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-text">
+          <div class="hero-badge">
+            <span class="dot"></span>
+            v1.0 — Now with Servo &amp; Camera modules
+          </div>
+          <h1>IoT Development,<br><span class="highlight">Simplified.</span></h1>
+          <p>An Arduino framework that turns complex hardware integrations into one-line function calls. ESP32, ESP8266, and Arduino &mdash; with an optional cloud backend included.</p>
+          <div class="hero-buttons">
+            <a href="#install" class="btn btn-primary">Get Started</a>
+            <a href="https://github.com/emmanueltigo/integrall" class="btn btn-ghost" target="_blank" rel="noopener">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+              View on GitHub
+            </a>
+          </div>
+        </div>
+
+        <div class="hero-code">
+          <!-- Standard Arduino -->
+          <div class="code-block">
+            <div class="code-header">
+              <div class="code-dots"><span></span><span></span><span></span></div>
+              <span class="code-label standard">Standard Arduino</span>
+            </div>
+            <div class="code-body">
+<pre><span class="line-num"> 1</span><span class="tk-directive">#include</span> <span class="tk-string">&lt;Wire.h&gt;</span>
+<span class="line-num"> 2</span><span class="tk-directive">#define</span> <span class="tk-macro">TRIG</span> <span class="tk-number">5</span>
+<span class="line-num"> 3</span><span class="tk-directive">#define</span> <span class="tk-macro">ECHO</span> <span class="tk-number">6</span>
+<span class="line-num"> 4</span><span class="tk-keyword">void</span> <span class="tk-function">setup</span>() {
+<span class="line-num"> 5</span>  Serial.<span class="tk-function">begin</span>(<span class="tk-number">115200</span>);
+<span class="line-num"> 6</span>  <span class="tk-function">pinMode</span>(<span class="tk-macro">TRIG</span>, <span class="tk-macro">OUTPUT</span>);
+<span class="line-num"> 7</span>  <span class="tk-function">pinMode</span>(<span class="tk-macro">ECHO</span>, <span class="tk-macro">INPUT</span>);
+<span class="line-num"> 8</span>}
+<span class="line-num"> 9</span><span class="tk-keyword">void</span> <span class="tk-function">loop</span>() {
+<span class="line-num">10</span>  <span class="tk-function">digitalWrite</span>(<span class="tk-macro">TRIG</span>, <span class="tk-macro">LOW</span>);
+<span class="line-num">11</span>  <span class="tk-function">delayMicroseconds</span>(<span class="tk-number">2</span>);
+<span class="line-num">12</span>  <span class="tk-function">digitalWrite</span>(<span class="tk-macro">TRIG</span>, <span class="tk-macro">HIGH</span>);
+<span class="line-num">13</span>  <span class="tk-function">delayMicroseconds</span>(<span class="tk-number">10</span>);
+<span class="line-num">14</span>  <span class="tk-function">digitalWrite</span>(<span class="tk-macro">TRIG</span>, <span class="tk-macro">LOW</span>);
+<span class="line-num">15</span>  <span class="tk-keyword">long</span> d = <span class="tk-function">pulseIn</span>(<span class="tk-macro">ECHO</span>,<span class="tk-macro">HIGH</span>);
+<span class="line-num">16</span>  Serial.<span class="tk-function">println</span>(d * <span class="tk-number">0.034</span> / <span class="tk-number">2</span>);
+<span class="line-num">17</span>}</pre>
+            </div>
+            <div class="lines-badge bad">17 lines &mdash; manual timing, no filtering, blocks loop</div>
+          </div>
+
+          <!-- Integrall Way -->
+          <div class="code-block">
+            <div class="code-header">
+              <div class="code-dots"><span></span><span></span><span></span></div>
+              <span class="code-label integrall">The Integrall Way</span>
+            </div>
+            <div class="code-body">
+<pre><span class="line-num">1</span><span class="tk-directive">#define</span> <span class="tk-macro">INTEGRALL_ENABLE_SENSORS</span>
+<span class="line-num">2</span><span class="tk-directive">#include</span> <span class="tk-string">&lt;Integrall.h&gt;</span>
+<span class="line-num">3</span><span class="tk-class">Integrall</span>::<span class="tk-type">System</span> integrall;
+<span class="line-num">4</span><span class="tk-keyword">void</span> <span class="tk-function">setup</span>() { integrall.<span class="tk-function">begin</span>(); }
+<span class="line-num">5</span><span class="tk-keyword">void</span> <span class="tk-function">loop</span>() {
+<span class="line-num">6</span>  <span class="tk-keyword">float</span> d = integrall.<span class="tk-function">readDistance</span>(<span class="tk-number">5</span>, <span class="tk-number">6</span>);
+<span class="line-num">7</span>  integrall.<span class="tk-function">println</span>(<span class="tk-string">"Distance: %.1f cm"</span>, d);
+<span class="line-num">8</span>}</pre>
+            </div>
+            <div class="lines-badge good">8 lines &mdash; auto-filtered, non-blocking, cloud-ready</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== FEATURES ========== -->
+  <section class="features" id="features">
+    <div class="container">
+      <div class="text-center">
+        <span class="section-label">Why Integrall</span>
+        <h2>Write logic, not boilerplate</h2>
+        <p class="section-desc">Integrall abstracts away hardware complexity so you can focus on building what matters.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card reveal">
+          <div class="feature-icon purple">⚡</div>
+          <h3>One-Line Hardware</h3>
+          <p>Control relays, LCDs, servos, and sensors with single function calls. No more 50-line initialization routines &mdash; just <code>integrall.enableRelay(5)</code> and you're done.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon green">🔄</div>
+          <h3>Non-Blocking by Default</h3>
+          <p>Every operation uses <code>millis()</code> timing. Servo sweeps, buzzer patterns, LCD scrolling &mdash; all run in the background while your WiFi and sensors stay responsive.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon orange">☁️</div>
+          <h3>Professional Cloud Sync</h3>
+          <p>Works offline or online. Launch in <strong>AP Mode</strong> for local control, or <strong>Station Mode</strong> with a one-line telemetry sync: <code>integrall.sendTelemetry("temp", 25)</code>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== MODULES ========== -->
+  <section class="modules" id="modules">
+    <div class="container">
+      <div class="text-center">
+        <span class="section-label">Hardware Modules</span>
+        <h2>10 modules. One include.</h2>
+        <p class="section-desc">Enable only what you need. Each module compiles to zero overhead when disabled &mdash; perfect for memory-constrained boards.</p>
+      </div>
+      <div class="modules-grid">
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">🔌</div>
+            <div><h3>Relay Control</h3></div>
+          </div>
+          <p>Up to 4 relays with safety timeouts, interlock groups, and physical button triggers.</p>
+          <div class="module-code"><span class="tk-keyword">int</span> r = integrall.<span class="tk-function">enableRelay</span>(<span class="tk-number">5</span>, <span class="tk-keyword">true</span>, <span class="tk-string">"Pump"</span>);</div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">📺</div>
+            <div><h3>LCD Display</h3></div>
+          </div>
+          <p>I2C 16x2 LCD with auto-scrolling for long text, custom characters, and cursor control.</p>
+          <div class="module-code">integrall.<span class="tk-function">lcdPrint</span>(<span class="tk-string">"Hello World!"</span>, <span class="tk-number">0</span>, <span class="tk-number">0</span>);</div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">🖥️</div>
+            <div><h3>OLED Display</h3></div>
+          </div>
+          <p>SSD1306 128x64 OLED with text, labeled values, and progress bar drawing.</p>
+          <div class="module-code">integrall.<span class="tk-function">oledPrintValue</span>(<span class="tk-string">"Temp: "</span>, <span class="tk-number">24.5</span>, <span class="tk-number">0</span>);</div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">⚙️</div>
+            <div><h3>Servo Motors</h3></div>
+          </div>
+          <p>Up to 4 servos with instant set, non-blocking sweep, smooth easing, and analog mapping.</p>
+          <div class="module-code">integrall.<span class="tk-function">easeServo</span>(arm, <span class="tk-number">180</span>, <span class="tk-number">15</span>);</div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">📡</div>
+            <div><h3>Sensors</h3></div>
+          </div>
+          <p>Ultrasonic distance, PIR motion, analog %, LDR light, and DHT temperature/humidity.</p>
+          <div class="module-code"><span class="tk-keyword">float</span> cm = integrall.<span class="tk-function">readDistance</span>(<span class="tk-number">5</span>, <span class="tk-number">6</span>);</div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">🔢</div>
+            <div><h3>Matrix Keypad</h3></div>
+          </div>
+          <p>4x4 and 4x3 keypads with buffer capture, backspace, submit, and PIN validation.</p>
+          <div class="module-code"><span class="tk-keyword">bool</span> ok = integrall.<span class="tk-function">keypadCheckPin</span>(<span class="tk-string">"1234"</span>);</div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">🔊</div>
+            <div><h3>Buzzer Alerts</h3></div>
+          </div>
+          <p>Non-blocking beeps, patterns, and melodic feedback &mdash; alert, success, and failure tones.</p>
+          <div class="module-code">integrall.<span class="tk-function">buzzerSuccess</span>();</div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">💡</div>
+            <div><h3>RGB LED</h3></div>
+          </div>
+          <p>Common anode/cathode support with named color presets and non-blocking blink.</p>
+          <div class="module-code">integrall.<span class="tk-function">setColor</span>(<span class="tk-string">"blue"</span>);</div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">📷</div>
+            <div><h3>ESP32-CAM</h3></div>
+          </div>
+          <p>MJPEG streaming with PSRAM auto-detection. Supports 15+ camera board models.</p>
+          <div class="module-code">integrall.<span class="tk-function">enableCamera</span>();ㅤ<span class="tk-comment">// That's it.</span></div>
+        </div>
+
+        <div class="module-card reveal">
+          <div class="module-card-header">
+            <div class="module-icon">✨</div>
+            <div><h3>Non-Blocking Blinker</h3></div>
+          </div>
+          <p>Replace <code>delay()</code>-based blink with a background-running LED toggle.</p>
+          <div class="module-code">integrall.<span class="tk-function">blink</span>(<span class="tk-number">2</span>, <span class="tk-number">500</span>);</div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== PROJECTS ========== -->
+  <section class="projects" id="projects">
+    <div class="container">
+      <div class="text-center">
+        <span class="section-label">Ready-Made Projects</span>
+        <h2>Complete systems in two function calls</h2>
+        <p class="section-desc">Combine modules into professional IoT systems. Each project needs just one call in <code>setup()</code> and one in <code>loop()</code>.</p>
+      </div>
+      <div class="projects-grid">
+
+        <div class="project-card reveal">
+          <div class="project-card-header">
+            <h3><span>🔐</span> PIN Lock System</h3>
+            <span class="project-lines">12 lines</span>
+          </div>
+          <p>Complete door lock with keypad input, asterisk display on LCD, PIN validation, auto-lock relay, wrong-attempt counter, and lockout protection.</p>
+          <div class="project-tags">
+            <span class="project-tag">Keypad</span>
+            <span class="project-tag">Relay</span>
+            <span class="project-tag">LCD</span>
+          </div>
+        </div>
+
+        <div class="project-card reveal">
+          <div class="project-card-header">
+            <h3><span>🚨</span> Alarm System</h3>
+            <span class="project-lines">10 lines</span>
+          </div>
+          <p>PIR motion-triggered alarm with siren relay, cooldown timer, LCD alerts, and buzzer feedback. Automatic detection and recovery cycle.</p>
+          <div class="project-tags">
+            <span class="project-tag">Sensors</span>
+            <span class="project-tag">Relay</span>
+            <span class="project-tag">Buzzer</span>
+          </div>
+        </div>
+
+        <div class="project-card reveal">
+          <div class="project-card-header">
+            <h3><span>🚗</span> Parking Sensor</h3>
+            <span class="project-lines">8 lines</span>
+          </div>
+          <p>Ultrasonic distance display with "Safe / Slow Down / STOP" status, buzzer proximity beeps, and live distance on LCD or OLED.</p>
+          <div class="project-tags">
+            <span class="project-tag">Sensors</span>
+            <span class="project-tag">LCD</span>
+            <span class="project-tag">Buzzer</span>
+          </div>
+        </div>
+
+        <div class="project-card reveal">
+          <div class="project-card-header">
+            <h3><span>🌡️</span> Weather Station</h3>
+            <span class="project-lines">5 lines</span>
+          </div>
+          <p>DHT temperature monitoring with timed readings and <strong>unlimited telemetry syncing</strong> to the Integrall Cloud using a single-line API.</p>
+          <div class="project-tags">
+            <span class="project-tag">Sensors (DHT)</span>
+            <span class="project-tag">LCD</span>
+            <span class="project-tag">Cloud</span>
+          </div>
+        </div>
+
+        <div class="project-card reveal">
+          <div class="project-card-header">
+            <h3><span>💡</span> Smart Switch</h3>
+            <span class="project-lines">8 lines</span>
+          </div>
+          <p>Motion-activated lighting with configurable auto-off timeout. Turns on when PIR detects movement, turns off after inactivity.</p>
+          <div class="project-tags">
+            <span class="project-tag">Relay</span>
+            <span class="project-tag">Sensors (PIR)</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== PLATFORMS ========== -->
+  <section class="platforms">
+    <div class="container">
+      <div class="text-center">
+        <span class="section-label">Platform Support</span>
+        <h2>Works where you work</h2>
+        <p class="section-desc">Full networking on ESP32 and ESP8266. Offline mode on classic Arduino boards. Build with your preferred IDE.</p>
+      </div>
+      <div class="platforms-row reveal">
+        <div class="platform-item">
+          <div class="platform-icon">🔧</div>
+          <span class="platform-name">ESP32</span>
+          <span class="platform-note">Full features</span>
+        </div>
+        <div class="platform-item">
+          <div class="platform-icon">📶</div>
+          <span class="platform-name">ESP8266</span>
+          <span class="platform-note">WiFi + backend</span>
+        </div>
+        <div class="platform-item">
+          <div class="platform-icon">🔩</div>
+          <span class="platform-name">Arduino Uno/Mega</span>
+          <span class="platform-note">Offline mode</span>
+        </div>
+        <div class="platform-item">
+          <div class="platform-icon">🛠️</div>
+          <span class="platform-name">PlatformIO</span>
+          <span class="platform-note">Recommended</span>
+        </div>
+        <div class="platform-item">
+          <div class="platform-icon">📝</div>
+          <span class="platform-name">Arduino IDE</span>
+          <span class="platform-note">Supported</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== INSTALL ========== -->
+  <section class="install" id="install">
+    <div class="container">
+      <div class="text-center">
+        <span class="section-label">Get Started</span>
+        <h2>Up and running in 2 minutes</h2>
+        <p class="section-desc">Install the library, include the header, and start building.</p>
+      </div>
+
+      <div class="install-tabs-wrapper">
+        <div class="install-tabs">
+          <button class="install-tab active" data-tab="tab-platformio">PlatformIO</button>
+          <button class="install-tab" data-tab="tab-arduino">Arduino IDE</button>
+          <button class="install-tab" data-tab="tab-manual">Manual</button>
+        </div>
+      </div>
+
+      <!-- PlatformIO -->
+      <div class="install-panel active" id="tab-platformio">
+        <div class="install-code">
+          <button class="copy-btn">Copy</button>
+<pre><span class="tk-comment">; platformio.ini</span>
+[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+lib_deps =
+    bblanchon/ArduinoJson @ ^6.21.3
+    <span class="tk-comment">; Copy the Integrall folder into your project's lib/ directory</span>
+    <span class="tk-comment">; or install from the release .zip</span></pre>
+        </div>
+        <p class="install-note">Place the <code>Integrall/</code> folder inside your project's <code>lib/</code> directory, then build.</p>
+      </div>
+
+      <!-- Arduino IDE -->
+      <div class="install-panel" id="tab-arduino">
+        <div class="install-code">
+          <button class="copy-btn">Copy</button>
+<pre><span class="tk-comment">// 1. Open Arduino IDE</span>
+<span class="tk-comment">// 2. Sketch → Include Library → Add .ZIP Library...</span>
+<span class="tk-comment">// 3. Select the Integrall_v1_0.zip file</span>
+<span class="tk-comment">// 4. Install "ArduinoJson" from Library Manager</span>
+<span class="tk-comment">// 5. Done! Now use it:</span>
+
+<span class="tk-directive">#define</span> <span class="tk-macro">INTEGRALL_ENABLE_RELAY</span>
+<span class="tk-directive">#include</span> <span class="tk-string">&lt;Integrall.h&gt;</span>
+
+<span class="tk-class">Integrall</span>::<span class="tk-type">System</span> integrall;
+
+<span class="tk-keyword">void</span> <span class="tk-function">setup</span>() { integrall.<span class="tk-function">begin</span>(); }
+<span class="tk-keyword">void</span> <span class="tk-function">loop</span>()  { integrall.<span class="tk-function">handle</span>(); }</pre>
+        </div>
+        <p class="install-note">Install additional libraries (LCD, Keypad, Servo, etc.) from the Library Manager based on which modules you enable.</p>
+      </div>
+
+      <!-- Manual -->
+      <div class="install-panel" id="tab-manual">
+        <div class="install-code">
+          <button class="copy-btn">Copy</button>
+<pre><span class="tk-comment"># Clone the repository</span>
+git clone https://github.com/emmanueltigo/integrall.git
+
+<span class="tk-comment"># Copy the library into your Arduino libraries folder</span>
+cp -r integrall/firmware/Integrall ~/Arduino/libraries/
+
+<span class="tk-comment"># Or for PlatformIO, copy into your project</span>
+cp -r integrall/firmware/Integrall your-project/lib/</pre>
+        </div>
+        <p class="install-note">See <a href="https://github.com/emmanueltigo/integrall/blob/main/DEPENDENCIES.md">DEPENDENCIES.md</a> for the full list of optional libraries per module.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ========== CTA BANNER ========== -->
+  <section class="cta-banner">
+    <div class="container">
+      <h2>Ready to simplify your IoT projects?</h2>
+      <p>Join developers building smarter hardware with less code.</p>
+      <div class="cta-buttons">
+        <a href="#install" class="btn btn-primary">Get Started Now</a>
+        <a href="https://github.com/emmanueltigo/integrall" class="btn btn-ghost" target="_blank" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== FOOTER ========== -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a href="#" class="nav-logo" style="font-size:1.3rem">INTEGRALL</a>
+          <p>An open-source IoT framework that simplifies hardware integration and cloud connectivity for ESP32, ESP8266, and Arduino boards.</p>
+        </div>
+        <div>
+          <h4>Documentation</h4>
+          <ul class="footer-links">
+            <li><a href="#install">Getting Started</a></li>
+            <li><a href="#modules">Hardware Modules</a></li>
+            <li><a href="#projects">Project Guides</a></li>
+            <li><a href="#">API Reference</a></li>
+            <li><a href="#">Backend Setup</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Resources</h4>
+          <ul class="footer-links">
+            <li><a href="#">Examples Gallery</a></li>
+            <li><a href="#">Release Notes</a></li>
+            <li><a href="#">Dependencies</a></li>
+            <li><a href="#">Troubleshooting</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Community</h4>
+          <ul class="footer-links">
+            <li><a href="https://github.com/emmanueltigo/integrall" target="_blank" rel="noopener">GitHub</a></li>
+            <li><a href="https://github.com/emmanueltigo/integrall/issues" target="_blank" rel="noopener">Report Issue</a></li>
+            <li><a href="https://github.com/emmanueltigo/integrall/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a></li>
+            <li><a href="#">Discord</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>Built by <strong>Emmanuel TIGO</strong> &middot; MIT License</span>
+        <div class="footer-badges">
+          <span class="footer-badge">v1.0.0</span>
+          <span class="footer-badge">ESP32</span>
+          <span class="footer-badge">FastAPI</span>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

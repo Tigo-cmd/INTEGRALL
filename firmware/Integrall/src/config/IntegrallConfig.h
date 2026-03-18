@@ -11,12 +11,12 @@
 #include <Arduino.h>
 
 // Default debug level if not specified in sketch (0=none, 1=errors, 2=warnings, 3=info, 4=verbose)
-#ifndef INTEGRALL_DEBUG_LEVEL
-  #define INTEGRALL_DEBUG_LEVEL 3
-#endif
-
 #ifndef INTEGRALL_VERSION_STRING
   #define INTEGRALL_VERSION_STRING "1.0.0"
+#endif
+
+#ifndef INTEGRALL_BACKEND_ENABLED
+  #define INTEGRALL_BACKEND_ENABLED 1
 #endif
 
 // ============================================================================

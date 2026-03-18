@@ -18,8 +18,10 @@
 
 /**
  * ARCHITECTURE DETECTION & NETWORKING ENABLEMENT
+ * Networking capability is compiled generically for ESP boards to avoid ODR violations
+ * if sketches toggle WIFI flags.
  */
-#if (defined(ESP32) || defined(ESP8266)) && INTEGRALL_MODULE_WIFI_ENABLED
+#if (defined(ESP32) || defined(ESP8266))
   #define INTEGRALL_NETWORK_AVAILABLE 1
   #include <ArduinoJson.h> 
   #if defined(ESP32)
@@ -103,6 +105,17 @@ public:
     // Easy HTTP API
     String httpGet(const char* url);
     int httpPost(const char* url, const char* payload, const char* contentType = "application/json");
+    
+    /**
+     * Post a file/buffer as multipart form data
+     */
+    int httpPostFile(const char* url, uint8_t* data, size_t len, const char* fileName, const char* fileKey = "file", const char* extraKey = nullptr, const char* extraVal = nullptr);
+
+    /**
+     * Get a stream for the given URL (caller must end the request)
+     */
+    Stream* getStream(const char* url);
+    void endStream();
     #endif
     
     // Configuration portal (WiFiManager integration point)
@@ -113,8 +126,9 @@ public:
     // Force reconnection
     void reconnect();
     
-    // Get last error
+    // Get last error or response
     const char* getLastError() const { return _last_error; }
+    const char* getLastResponse() const { return _last_response.c_str(); }
 
 private:
     DeviceConfig _config;
@@ -144,6 +158,8 @@ private:
     void _checkBackendCommands();
     void _setState(DeviceState new_state);
     void _setError(const char* error);
+    
+    String _last_response;
     
     // WiFi event handlers (static because WiFi.onEvent requires static)
     #if defined(ESP32) && INTEGRALL_NETWORK_AVAILABLE

@@ -122,7 +122,7 @@ void loop() {
 
 Utility methods include: `isWiFiConnected()`, `getIPAddress()`, `getWiFiStrength()`, `httpGet()`, `httpPost()`, and more.
 
-> **NOTE on Backend**: A cloud backend (Python/FastAPI) for device management, telemetry, and remote commands is **under active development** and not yet included in the current release. The firmware-side networking code is fully implemented — when the backend is available, no firmware changes will be required. See the [Roadmap](#roadmap) for details.
+> **NOTE on Backend**: v1.0.0 includes a production-ready **Flask/Python Backend** for device telemetry and live visualization. The React dashboard is fully integrated with the firmware's automated telemetry sync.
 
 ---
 
@@ -151,8 +151,8 @@ Utility methods include: `isWiFiConnected()`, `getIPAddress()`, `getWiFiStrength
 - [x] **v0.5 Core Modules**: LCD, OLED, Sensors, Relays, Buzzer, Blinker.
 - [x] **v0.8 Expansion**: Camera, Rich Audio, Input UI, Storage, Time/GPS, Power, Stepper, Communication (BLE/LoRa).
 - [x] **Project Presets**: Smart Lock, Alarm System, Weather Station, Parking Sensor, Smart Switch.
-- [ ] **v1.0 Backend**: FastAPI cloud backend with device management, telemetry dashboard, and remote commands.
-- [ ] **v1.1 Advanced**: Fleet Management, OTA Updates, MQTT Broker Integration.
+- [x] **v1.0 Backend**: 🐍 Flask cloud backend with device telemetry, live React dashboard, and redundant sensor analysis.
+- [ ] **v1.1 Fleet**: Advanced Device Management, OTA Updates, and MQTT Broker Integration.
 
 ## Contributing
 Integrall is an open-source project. We welcome contributions for new hardware modules, bug fixes, and documentation improvements.

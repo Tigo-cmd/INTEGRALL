@@ -15,8 +15,9 @@
 #if INTEGRALL_MODULE_OLED_ENABLED
 
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+
+  #include <Adafruit_GFX.h>
+  #include <Adafruit_SSD1306.h>
 
 #ifndef INTEGRALL_OLED_WIDTH
   #define INTEGRALL_OLED_WIDTH  128

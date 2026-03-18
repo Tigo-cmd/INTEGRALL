@@ -149,21 +149,30 @@ public:
     bool begin(const DeviceConfig& config);
     
     /**
-     * The Easiest Way: Initialize WiFi and Cloud in one line
-     * @param ssid     Your WiFi name
-     * @param pass     Your WiFi password
-     * @param url      Your backend URL (optional)
+     * Standard WiFi Station Mode - Connects to your router
      */
     bool begin(const char* ssid, const char* pass, const char* url = nullptr) {
         DeviceConfig config;
         config.wifi_ssid = ssid;
         config.wifi_password = pass;
         config.backend_url = url;
+        config.use_wifi_manager = false;
+        return begin(config);
+    }
+
+    /**
+     * Access Point (AP) Mode - ESP32 creates its own network
+     */
+    bool beginAP(const char* ap_ssid, const char* ap_password = nullptr) {
+        DeviceConfig config;
+        config.wifi_ssid = ap_ssid;
+        config.wifi_password = ap_password;
+        config.use_wifi_manager = true; // Use portal/AP logic
         return begin(config);
     }
     
     /**
-     * Start the system in Offline Mode (for standard Arduino boards)
+     * Start the system in Offline Mode (No WiFi enabled)
      */
     bool begin();
     
@@ -406,20 +415,37 @@ public:
     /**
      * Read DS18B20 Probe Temperature
      */
-    #if __has_include(<DallasTemperature.h>)
     float readProbeTemp(uint8_t pin, bool celsius = true) {
         return _sensor_module.readProbeTemp(pin, celsius);
     }
-    #endif
 
     /**
      * Read BME280 Environment
      */
-    #if __has_include(<Adafruit_BME280.h>)
     void readEnvironment(uint8_t addr, float &temp, float &hum, float &pres) {
         _sensor_module.readEnvironment(addr, temp, hum, pres);
     }
-    #endif
+
+    /**
+     * Read DHT Temperature
+     */
+    float readTemperature(uint8_t pin, uint8_t type = 11, bool celsius = true) {
+        return _sensor_module.readTemperature(pin, type, celsius);
+    }
+
+    /**
+     * Read DHT Humidity
+     */
+    float readHumidity(uint8_t pin, uint8_t type = 11) {
+        return _sensor_module.readHumidity(pin, type);
+    }
+
+    /**
+     * Atmosphere Math helpers
+     */
+    float calculateAltitude(float pressure, float seaLevel = 1013.25) { return _sensor_module.calculateAltitude(pressure, seaLevel); }
+    float calculateDewPoint(float temp, float humidity) { return _sensor_module.calculateDewPoint(temp, humidity); }
+    float calculateHeatIndex(float temp, float humidity) { return _sensor_module.calculateHeatIndex(temp, humidity); }
     
     #endif // INTEGRALL_MODULE_SENSORS_ENABLED
     
@@ -843,24 +869,24 @@ public:
         snprintf(url, sizeof(url), "http://%s:81/stream", getIPAddress());
         return url;
     }
+    
+    /**
+     * Capture a single frame from the camera.
+     * Use cameraRelease() to free the memory afterward.
+     */
+    camera_fb_t* cameraCapture() {
+        return _camera_module.capture();
+    }
+
+    /**
+     * Release a captured camera frame buffer.
+     */
+    void cameraRelease(camera_fb_t* fb) {
+        _camera_module.release(fb);
+    }
 
     #endif // INTEGRALL_MODULE_CAMERA_ENABLED
 
-    // ========================================================================
-    // SENSOR EXTRAS: DHT Temperature & Humidity
-    // ========================================================================
-    #if INTEGRALL_MODULE_SENSORS_ENABLED
-    #if INTEGRALL_DHT_AVAILABLE
-
-    float readTemperature(uint8_t pin, uint8_t type = 22) {
-        return _sensor_module.readTemperature(pin, type);
-    }
-    float readHumidity(uint8_t pin, uint8_t type = 22) {
-        return _sensor_module.readHumidity(pin, type);
-    }
-
-    #endif // INTEGRALL_DHT_AVAILABLE
-    #endif // INTEGRALL_MODULE_SENSORS_ENABLED
 
     // ========================================================================
     // PROJECT-LEVEL API: ALARM SYSTEM
@@ -997,7 +1023,14 @@ public:
         _wx_last = now;
         float t = _sensor_module.readTemperature(_wx_pin, _wx_type);
         float h = _sensor_module.readHumidity(_wx_pin, _wx_type);
-        if (t == -999.0f || h < 0) return;
+        if (t == -999.0f || h < 0) {
+            #if INTEGRALL_MODULE_LCD_ENABLED
+            _lcd_module.print("! Sensor Error !", 0, 0);
+            _lcd_module.print("  Check Wiring  ", 0, 1);
+            #endif
+            INTEGRALL_LOG_ERROR("DHT Sensor failed to read in WeatherStation update");
+            return;
+        }
         #if INTEGRALL_MODULE_LCD_ENABLED
         char row0[17], row1[17];
         snprintf(row0, sizeof(row0), " Temp: %.1fC     ", t);
@@ -1097,6 +1130,8 @@ public:
      * @param json_data JSON document with telemetry data
      */
     bool sendTelemetry(const JsonDocument& data);
+    bool sendTelemetry(const char* key, float value);
+    bool sendTelemetry(const char* key, const char* value);
     
     /**
      * Perform an easy HTTP GET request
@@ -1109,6 +1144,34 @@ public:
      * @return HTTP response code
      */
     int httpPost(const char* url, const char* payload) { return _device_manager.httpPost(url, payload); }
+    
+    /**
+     * Post a file-like buffer as multipart form data
+     */
+    int httpPostFile(const char* url, uint8_t* data, size_t len, const char* fileName, const char* fileKey = "file", const char* extraKey = nullptr, const char* extraVal = nullptr) {
+        return _device_manager.httpPostFile(url, data, len, fileName, fileKey, extraKey, extraVal);
+    }
+
+    /**
+     * Get a network stream for raw reading (e.g. audio stream)
+     */
+    Stream* getStream(const char* url) {
+        return _device_manager.getStream(url);
+    }
+
+    /**
+     * Close the current network stream
+     */
+    void endStream() {
+        _device_manager.endStream();
+    }
+
+    /**
+     * Get the body of the last HTTP response
+     */
+    const char* getLastResponse() {
+        return _device_manager.getLastResponse();
+    }
     #endif
 
     /**
@@ -1323,6 +1386,14 @@ bool System::begin(const DeviceConfig& config) {
     }
     #endif
 
+    #if INTEGRALL_MODULE_OLED_ENABLED
+    if (!_oled_module.begin()) {
+        INTEGRALL_LOG_ERROR("OLEDModule initialization failed! Check I2C wiring.");
+    } else {
+        INTEGRALL_LOG_INFO("OLED Connected Successfully");
+    }
+    #endif
+
     #if INTEGRALL_MODULE_CAMERA_ENABLED
     // Camera init should happen after WiFi if WiFi is intended, 
     // but CameraModule itself handles the WiFi dependency now.
@@ -1376,6 +1447,14 @@ bool System::begin() {
     #if INTEGRALL_MODULE_LCD_ENABLED
     if (!_lcd_module.begin()) {
         INTEGRALL_LOG_ERROR("LCDModule initialization failed");
+    }
+    #endif
+
+    #if INTEGRALL_MODULE_OLED_ENABLED
+    if (!_oled_module.begin()) {
+        INTEGRALL_LOG_ERROR("OLEDModule initialization failed! Check I2C wiring.");
+    } else {
+        INTEGRALL_LOG_INFO("OLED Connected Successfully");
     }
     #endif
 
@@ -1516,11 +1595,32 @@ void System::reconnect() {
     _device_manager.reconnect();
 }
 
-#if INTEGRALL_NETWORK_AVAILABLE
-bool System::sendTelemetry(const JsonDocument& data) {
-    return _device_manager.sendTelemetry(data);
-}
-#endif
+    #if INTEGRALL_NETWORK_AVAILABLE
+    /**
+     * Send a single numeric value to the cloud backend
+     */
+    bool System::sendTelemetry(const char* key, float value) {
+        StaticJsonDocument<128> doc;
+        doc[key] = value;
+        return _device_manager.sendTelemetry(doc);
+    }
+
+    /**
+     * Send a single string value to the cloud backend
+     */
+    bool System::sendTelemetry(const char* key, const char* value) {
+        StaticJsonDocument<128> doc;
+        doc[key] = value;
+        return _device_manager.sendTelemetry(doc);
+    }
+
+    /**
+     * Send a full JSON document to the cloud backend
+     */
+    bool System::sendTelemetry(const JsonDocument& data) {
+        return _device_manager.sendTelemetry(data);
+    }
+    #endif
 
 } // namespace Integrall
 

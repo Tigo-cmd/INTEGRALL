@@ -55,15 +55,47 @@ integrall.begin(); // pulls from global config automatically
 Best for sharing code or moving between networks.
 ```cpp
 void setup() {
-    Integrall::DeviceConfig config;
-    config.wifi_ssid = "SecretNetwork";
-    config.wifi_password = "Password123";
-
-    integrall.begin(config);
+    integrall.begin("SecretNetwork", "Password123", "http://your-backend.com");
 }
 ```
 
-> **IMPORTANT:** Manual Config still requires `#define INTEGRALL_ENABLE_WIFI` at the top of your sketch to activate the networking hardware!
+### 3. Access Point (AP) Mode
+If you want the ESP32 to create its own WiFi network so you can connect to it directly from your phone.
+```cpp
+void setup() {
+    integrall.beginAP("Integrall hotspot", "password123");
+}
+```
+
+> **IMPORTANT:** All WiFi modes still require `#define INTEGRALL_ENABLE_WIFI` at the top of your sketch!
+
+---
+
+## Connectivity & Cloud
+
+Integrall handles the complexity of WiFi reconnections and backend synchronization automatically.
+
+### Sending Data to Cloud (Telemetry)
+Once the system is `ONLINE` (after `begin()` with a backend URL), you can send data with zero JSON boilerplate:
+```cpp
+void loop() {
+    integrall.handle();
+    
+    // Send a single value
+    integrall.sendTelemetry("temperature", 24.5);
+    
+    // Or send a bundle of data
+    StaticJsonDocument<200> doc;
+    doc["temp"] = 25.0;
+    doc["hum"] = 60;
+    integrall.sendTelemetry(doc);
+}
+```
+
+### Checking Status
+- `integrall.isOnline()`: Returns `true` if connected to WiFi AND the backend.
+- `integrall.isWiFiConnected()`: Returns `true` if WiFi is up.
+- `integrall.getIPAddress()`: Returns the local IP.
 
 ---
 

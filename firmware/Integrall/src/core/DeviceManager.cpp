@@ -4,6 +4,11 @@
  * Implementation of device management core
  */
 
+// Force compilation of networking logic in the library object file.
+// The Arduino compilation process builds .cpp files independently of the sketch.
+// By defining this here, we ensure the linker has the network symbols available.
+// If the user's sketch DOES NOT enable WiFi, the linker will simply garbage-collect (--gc-sections)
+// this unused code, resulting in zero overhead.
 #include "DeviceManager.h"
 
 namespace Integrall {
@@ -26,6 +31,13 @@ bool DeviceManager::begin(const DeviceConfig& config) {
     _instance = this;  // Set static pointer for callbacks
     
     Logger::begin();
+   #ifndef INTEGRALL_VERSION_STRING
+  #define INTEGRALL_VERSION_STRING "1.0.0"
+#endif
+
+#ifndef INTEGRALL_BACKEND_ENABLED
+  #define INTEGRALL_BACKEND_ENABLED 1
+#endif
     INTEGRALL_LOG_INFO("Integrall System Starting...");
     INTEGRALL_LOG_INFO_VAL("Version: ", INTEGRALL_VERSION_STRING);
     
@@ -43,11 +55,13 @@ bool DeviceManager::begin(const DeviceConfig& config) {
 
         // Attempt WiFi connection if credentials provided
         if (_config.wifi_ssid && strlen(_config.wifi_ssid) > 0) {
-            _setState(DeviceState::CONNECTING_WIFI);
-            if (!_connectWiFi()) {
-                if (_config.use_wifi_manager) {
-                    return startConfigPortal();
-                } else {
+            if (_config.use_wifi_manager) {
+                // Explicit AP Mode requested
+                return startConfigPortal(_config.wifi_ssid, _config.wifi_password);
+            } else {
+                // Standard Station (STA) Mode
+                _setState(DeviceState::CONNECTING_WIFI);
+                if (!_connectWiFi()) {
                     _setState(DeviceState::DISCONNECTED);
                     _setError("WiFi connection failed");
                     return false;
@@ -255,7 +269,11 @@ void DeviceManager::_onWiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
 #if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::sendTelemetry(const JsonDocument& data) {
     #if INTEGRALL_BACKEND_ENABLED
-    if (_state != DeviceState::ONLINE) return false;
+    // Allow sending data if we have WiFi, even if registration isn't complete yet
+    // (Crucial for simple Flask/Community backends that only want JSON posts)
+    if (_state != DeviceState::ONLINE && _state != DeviceState::WIFI_CONNECTED) {
+        return false;
+    }
     
     char url[128];
     snprintf(url, sizeof(url), "%s/api/telemetry", _config.backend_url);
@@ -305,7 +323,9 @@ bool DeviceManager::sendCommandResponse(const char* command_id, bool success, co
     _http.addHeader("Content-Type", "application/json");
     _http.addHeader("X-API-Key", _config.api_key);
     
-    int httpCode = _http.POST(serializeJson(doc));
+    String payload;
+    serializeJson(doc, payload);
+    int httpCode = _http.POST(payload);
     _http.end();
     return (httpCode == 200 || httpCode == 201);
     #endif
@@ -331,14 +351,16 @@ bool DeviceManager::stopConfigPortal() {
 #endif
 
 void DeviceManager::reconnect() {
+    #if INTEGRALL_NETWORK_AVAILABLE
     if (_state == DeviceState::DISCONNECTED || _state == DeviceState::ERROR) {
         _setState(DeviceState::CONNECTING_WIFI);
         WiFi.reconnect();
     }
+    #endif
 }
 
+#if INTEGRALL_NETWORK_AVAILABLE
 String DeviceManager::httpGet(const char* url) {
-    #if INTEGRALL_NETWORK_AVAILABLE
     #if defined(ESP32)
     _http.begin(url);
     #else
@@ -346,16 +368,13 @@ String DeviceManager::httpGet(const char* url) {
     #endif
     
     int code = _http.GET();
-    String res = "";
-    if (code == 200) res = _http.getString();
+    _last_response = "";
+    if (code == 200) _last_response = _http.getString();
     _http.end();
-    return res;
-    #endif
-    return "";
+    return _last_response;
 }
 
 int DeviceManager::httpPost(const char* url, const char* payload, const char* contentType) {
-    #if INTEGRALL_NETWORK_AVAILABLE
     #if defined(ESP32)
     _http.begin(url);
     #else
@@ -364,10 +383,75 @@ int DeviceManager::httpPost(const char* url, const char* payload, const char* co
     
     _http.addHeader("Content-Type", contentType);
     int code = _http.POST(payload);
+    _last_response = "";
+    if (code > 0) _last_response = _http.getString();
     _http.end();
     return code;
+}
+
+int DeviceManager::httpPostFile(const char* url, uint8_t* data, size_t len, const char* fileName, const char* fileKey, const char* extraKey, const char* extraVal) {
+    #if defined(ESP32)
+    _http.begin(url);
+    #else
+    _http.begin(_wifiClient, url);
     #endif
-    return -1;
+
+    String boundary = "----IntegrallBoundary" + String(millis());
+    _http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+    
+    String head = "--" + boundary + "\r\n";
+    head += "Content-Disposition: form-data; name=\"" + String(fileKey) + "\"; filename=\"" + String(fileName) + "\"\r\n";
+    head += "Content-Type: application/octet-stream\r\n\r\n";
+    
+    String tail = "\r\n--" + boundary;
+    if (extraKey && extraVal) {
+        tail += "\r\nContent-Disposition: form-data; name=\"" + String(extraKey) + "\"\r\n\r\n" + String(extraVal) + "\r\n--" + boundary;
+    }
+    tail += "--\r\n";
+    
+    size_t totalLen = head.length() + len + tail.length();
+    _http.addHeader("Content-Length", String(totalLen));
+    
+    int code = _http.sendRequest("POST", (uint8_t*)head.c_str(), head.length());
+    if (code > 0) {
+        uint8_t* buffer = (uint8_t*)malloc(totalLen);
+        if (buffer) {
+            memcpy(buffer, head.c_str(), head.length());
+            memcpy(buffer + head.length(), data, len);
+            memcpy(buffer + head.length() + len, tail.c_str(), tail.length());
+            code = _http.POST(buffer, totalLen);
+            free(buffer);
+        } else {
+            code = -2; // Out of memory
+        }
+    }
+    
+    _last_response = "";
+    if (code > 0) _last_response = _http.getString();
+    _http.end();
+    return code;
+}
+
+Stream* DeviceManager::getStream(const char* url) {
+    #if defined(ESP32)
+    _http.begin(url);
+    #else
+    _http.begin(_wifiClient, url);
+    #endif
+    
+    int code = _http.GET();
+    if (code == 200) {
+        #if defined(ESP32)
+        return &_http.getStream();
+        #else
+        return &_wifiClient;
+        #endif
+    }
+    return nullptr;
+}
+
+void DeviceManager::endStream() {
+    _http.end();
 }
 #endif
 

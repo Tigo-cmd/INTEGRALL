@@ -14,14 +14,12 @@
 
 #include <Arduino.h>
 
-// Optional: include DHT support if user has the library installed
-// Install via Library Manager: "DHT sensor library" by Adafruit
-#if __has_include(<DHT.h>)
-  #include <DHT.h>
-  #define INTEGRALL_DHT_AVAILABLE 1
-#else
-  #define INTEGRALL_DHT_AVAILABLE 0
-#endif
+#include <DHT.h>
+#define INTEGRALL_DHT_AVAILABLE 1
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
 
 namespace Integrall {
 
@@ -34,7 +32,11 @@ public:
      */
     int readAnalogPercent(uint8_t pin) {
         int val = analogRead(pin);
+        #if defined(ESP32)
+        return map(val, 0, 4095, 0, 100);
+        #else
         return map(val, 0, 1023, 0, 100);
+        #endif
     }
 
     /**
@@ -45,6 +47,27 @@ public:
     int readLightPercent(uint8_t pin, bool reverseScale = false) {
         int p = readAnalogPercent(pin);
         return reverseScale ? (100 - p) : p;
+    }
+
+    /**
+     * Calculate altitude based on pressure
+     */
+    float calculateAltitude(float pressure, float seaLevelPressure = 1013.25) {
+        return 44330.0 * (1.0 - pow(pressure / seaLevelPressure, 0.1903));
+    }
+
+    /**
+     * Simple Dew Point approximation
+     */
+    float calculateDewPoint(float temp, float humidity) {
+        return temp - ((100.0 - humidity) / 5.0);
+    }
+
+    /**
+     * Simple Heat Index approximation
+     */
+    float calculateHeatIndex(float temp, float humidity) {
+        return temp + 0.33 * humidity - 4.0;
     }
 
     /**
@@ -110,10 +133,7 @@ public:
      * Read DS18B20 Waterproof Temperature Sensor
      * Requires DallasTemperature and OneWire libraries.
      */
-#if __has_include(<DallasTemperature.h>)
     float readProbeTemp(uint8_t pin, bool celsius = true) {
-        #include <OneWire.h>
-        #include <DallasTemperature.h>
         OneWire oneWire(pin);
         DallasTemperature sensors(&oneWire);
         sensors.begin();
@@ -121,25 +141,19 @@ public:
         float t = celsius ? sensors.getTempCByIndex(0) : sensors.getTempFByIndex(0);
         return (t == DEVICE_DISCONNECTED_C || t == DEVICE_DISCONNECTED_F) ? -999.0f : t;
     }
-#endif
 
     /**
      * Read BME280 Environment Sensor (Multi-function)
      * Requires Adafruit_BME280 library.
      */
-#if __has_include(<Adafruit_BME280.h>)
     void readEnvironment(uint8_t addr, float &temp, float &hum, float &pres) {
-        #include <Adafruit_Sensor.h>
-        #include <Adafruit_BME280.h>
         Adafruit_BME280 bme;
         if (!bme.begin(addr)) { temp = hum = pres = -1.0f; return; }
         temp = bme.readTemperature();
         hum = bme.readHumidity();
         pres = bme.readPressure() / 100.0f; // hPa
     }
-#endif
 
-#if INTEGRALL_DHT_AVAILABLE
     /**
      * Read temperature from DHT11/DHT22 sensor
      * @param pin     Data pin
@@ -164,7 +178,6 @@ public:
         float h = dht.readHumidity();
         return isnan(h) ? -1.0f : h;
     }
-#endif
 };
 
 } // namespace Integrall

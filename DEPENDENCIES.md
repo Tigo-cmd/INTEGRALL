@@ -20,12 +20,21 @@ If you enable a module in your code (e.g., `#define INTEGRALL_ENABLE_LCD`), you 
 | :--- | :--- | :--- |
 | `INTEGRALL_ENABLE_LCD` | **LiquidCrystal I2C** | By Frank de Brabander |
 | `INTEGRALL_ENABLE_SERVO` | **ESP32Servo** | Required for ESP32 |
-| `INTEGRALL_ENABLE_SERVO` | **Servo** | Built-in for Uno/Mega |
 | `INTEGRALL_ENABLE_KEYPAD` | **Keypad** | By Mark Stanley |
 | `INTEGRALL_ENABLE_OLED` | **Adafruit SSD1306** | By Adafruit |
 | `INTEGRALL_ENABLE_OLED` | **Adafruit GFX Library** | Dependency for OLED |
 | `INTEGRALL_ENABLE_SENSORS`| **DHT sensor library** | By Adafruit (for temp/hum) |
-| `INTEGRALL_ENABLE_SENSORS`| **Adafruit Unified Sensor**| Dependency for DHT |
+| `INTEGRALL_ENABLE_SENSORS`| **DallasTemperature** | For waterproof probes |
+| `INTEGRALL_ENABLE_SENSORS`| **OneWire** | Required for DS18B20 |
+| `INTEGRALL_ENABLE_SENSORS`| **Adafruit BME280** | For high-precision env |
+| `INTEGRALL_ENABLE_SENSORS`| **Adafruit Unified Sensor** | Required for DHT/BME |
+| `INTEGRALL_ENABLE_INPUT`  | **MFRC522** | Wireless RFID cards |
+| `INTEGRALL_ENABLE_INPUT`  | **IRremote** | TV/Remote signal parsing |
+| `INTEGRALL_ENABLE_TIME`   | **TinyGPS++** | Satellite/GPS logic |
+| `INTEGRALL_ENABLE_TIME`   | **RTClib** | Hardware RTC (DS3231) |
+| `INTEGRALL_ENABLE_COMM`   | **LoRa** | Long-range radio comms |
+| `INTEGRALL_ENABLE_AUDIO`  | **DFRobotDFPlayerMini** | MP3 playback via Serial |
+| `INTEGRALL_ENABLE_POWER`  | **Adafruit INA219** | Current/Volt monitoring |
 
 ---
 

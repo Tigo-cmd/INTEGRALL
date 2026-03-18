@@ -100,6 +100,22 @@ public:
     bool isReady() const { return _initialized; }
     bool isServerRunning() const { return _server_started; }
 
+    /**
+     * Capture a single frame from the camera.
+     * Caller is responsible for calling release() to free the buffer.
+     */
+    camera_fb_t* capture() {
+        if (!_initialized) return nullptr;
+        return esp_camera_fb_get();
+    }
+
+    /**
+     * Free the frame buffer returned by capture().
+     */
+    void release(camera_fb_t* fb) {
+        if (fb) esp_camera_fb_return(fb);
+    }
+
 private:
     bool _initialized;
     bool _server_started;
