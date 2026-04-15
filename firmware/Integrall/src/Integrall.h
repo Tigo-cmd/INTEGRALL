@@ -74,7 +74,7 @@
 #include "modules/LCDModule.h"
 #endif
 
-#if INTEGRALL_MODULE_SENSORS_ENABLED
+#if INTEGRALL_MODULE_SENSORS_ENABLED || INTEGRALL_MODULE_IMU_ENABLED
 #include "modules/SensorModule.h"
 #endif
 
@@ -108,6 +108,10 @@
 
 #if INTEGRALL_MODULE_STORAGE_ENABLED
 #include "modules/StorageModule.h"
+#endif
+
+#if INTEGRALL_MODULE_CELLULAR_ENABLED
+#include "modules/CellularModule.h"
 #endif
 
 #if INTEGRALL_MODULE_TIME_ENABLED
@@ -448,7 +452,63 @@ public:
     float calculateHeatIndex(float temp, float humidity) { return _sensor_module.calculateHeatIndex(temp, humidity); }
     
     #endif // INTEGRALL_MODULE_SENSORS_ENABLED
+
+    // ========================================================================
+    // IMU MODULE API (available if INTEGRALL_ENABLE_IMU is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_IMU_ENABLED
     
+    /**
+     * Start the MPU6050 IMU sensor
+     */
+    bool enableIMU(uint8_t sda = 21, uint8_t scl = 22) {
+        return _sensor_module.beginIMU(sda, scl);
+    }
+    
+    /**
+     * Get total acceleration magnitude (Impact Force)
+     */
+    float getImpactForce() {
+        return _sensor_module.getImpactForce();
+    }
+    
+    /**
+     * Get the posture state string ("Standing", "Sitting", "Fallen")
+     */
+    const char* getPosture() {
+        return _sensor_module.getPostureString();
+    }
+    
+    /**
+     * Determine if the device is currently horizontal
+     */
+    bool isHorizontal() {
+        return _sensor_module.isHorizontal();
+    }
+    
+    #endif // INTEGRALL_MODULE_IMU_ENABLED
+
+    // ========================================================================
+    // CELLULAR MODULE API (available if INTEGRALL_ENABLE_CELLULAR is defined)
+    // ========================================================================
+    #if INTEGRALL_MODULE_CELLULAR_ENABLED
+    
+    /**
+     * Start the SIM800L module
+     */
+    bool cellularBegin(uint8_t rxPin = 16, uint8_t txPin = 17) {
+        return _cellular_module.begin(rxPin, txPin);
+    }
+    
+    /**
+     * Send an emergency SMS
+     */
+    void sendSMS(const char* number, const char* message) {
+        _cellular_module.sendSMS(number, message);
+    }
+    
+    #endif // INTEGRALL_MODULE_CELLULAR_ENABLED
+
     // ========================================================================
     // SERVO MODULE API (available if INTEGRALL_ENABLE_SERVO is defined)
     // ========================================================================
@@ -653,6 +713,13 @@ public:
      */
     void oledClear() {
         _oled_module.clear();
+    }
+
+    /**
+     * Get direct access to the Adafruit OLED Display object for advanced graphics
+     */
+    Adafruit_SSD1306* oled() {
+        return _oled_module.getRaw();
     }
 
     #endif // INTEGRALL_MODULE_OLED_ENABLED
@@ -1209,8 +1276,12 @@ private:
     LCDModule _lcd_module;
     #endif
 
-    #if INTEGRALL_MODULE_SENSORS_ENABLED
+    #if INTEGRALL_MODULE_SENSORS_ENABLED || INTEGRALL_MODULE_IMU_ENABLED
     SensorModule _sensor_module;
+    #endif
+
+    #if INTEGRALL_MODULE_CELLULAR_ENABLED
+    CellularModule _cellular_module;
     #endif
 
     #if INTEGRALL_MODULE_SERVO_ENABLED
@@ -1363,6 +1434,9 @@ System::~System() {
 }
 
 bool System::begin(const DeviceConfig& config) {
+    // 0. The ABSOLUTE first step is starting the Serial port for debugging
+    Logger::begin(115200); 
+    
     _config = config;
     
     INTEGRALL_LOG_INFO("=== Integrall System Starting ===");
@@ -1430,6 +1504,11 @@ void System::handle() {
     #if INTEGRALL_MODULE_CAMERA_ENABLED && INTEGRALL_MODULE_WIFI_ENABLED
     if (isWiFiConnected() && !_camera_module.isServerRunning()) {
         _camera_module.startServer();
+        INTEGRALL_LOG_INFO("Camera: MJPEG server started!");
+        INTEGRALL_LOG_INFO_VAL("Stream available at: ", getIPAddress());
+        Serial.print(">> [CAM LINK] http://");
+        Serial.print(getIPAddress());
+        Serial.println(":81/stream");
     }
     #endif
 

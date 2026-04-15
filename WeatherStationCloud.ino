@@ -99,27 +99,123 @@ void readSensors() {
 }
 
 void updateUI() {
-    // OLED visualization logic remains the same but with redunant data
+    Adafruit_SSD1306* d = integrall.oled();
+    if (!d) return;
+
+    d->clearDisplay();
+    d->setTextColor(SSD1306_WHITE);
+
+    // Draw a top header bar on every screen
+    d->fillRect(0, 0, 128, 12, SSD1306_WHITE);
+    d->setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+    d->setCursor(2, 2);
+    
     switch (screen) {
-        case 0: 
-            integrall.oledPrint("BME vs DHT", 0, 0);
-            integrall.oledPrintValue("BME: ", tempBME, 2);
-            integrall.oledPrintValue("DHT: ", tempDHT, 3);
+        case 0: {
+            d->print("WEATHER STATION ");
+            d->setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            
+            // Big Temperature
+            d->setTextSize(3);
+            d->setCursor(5, 20);
+            d->print(tempBME, 1);
+            
+            // Degree symbol manually
+            d->drawCircle(82, 22, 3, SSD1306_WHITE);
+            d->setTextSize(1);
+            d->setCursor(88, 20);
+            d->print("C");
+            
+            // Humidity below
+            d->setTextSize(1);
+            d->setCursor(5, 50);
+            d->print("Hum: ");
+            d->print(humBME, 1);
+            d->print("%");
             break;
-        case 1: 
-            integrall.oledPrint("ATMOSPHERE", 0, 0);
-            integrall.oledPrintValue("Pres: ", pres, 2);
-            integrall.oledPrintValue("Alt: ", alt, 4);
+        }
+        case 1: {
+            d->print("ATMOSPHERE INFO");
+            d->setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            
+            d->setTextSize(1);
+            d->setCursor(0, 20);
+            d->print("Pres: ");
+            d->print(pres, 1);
+            d->println(" hPa");
+            
+            d->setCursor(0, 32);
+            d->print("Alt : ");
+            d->print(alt, 0);
+            d->println(" m");
+
+            d->setCursor(0, 44);
+            d->print("DewP: ");
+            d->print(dewPoint, 1);
+            d->println(" C");
+            
+            d->setCursor(0, 56);
+            d->print("Heat: ");
+            d->print(heatIndex, 1);
+            d->println(" C");
             break;
-        case 2: 
-            integrall.oledPrint("ENVIRONMENT", 0, 0);
-            integrall.oledPrintValue("Light: ", light, 2);
-            integrall.oledPrintValue("Rain: ", rain, 3);
+        }
+        case 2: {
+            d->print("ENVIRONMENT");
+            d->setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            d->setTextSize(1);
+            
+            // Light Bar
+            d->setCursor(0, 18);
+            d->print("Light:");
+            d->drawRect(40, 16, 80, 10, SSD1306_WHITE);
+            d->fillRect(42, 18, map(light, 0, 100, 0, 76), 6, SSD1306_WHITE);
+
+            // Rain Bar
+            d->setCursor(0, 34);
+            d->print("Rain: ");
+            d->drawRect(40, 32, 80, 10, SSD1306_WHITE);
+            int mappedRain = map(rain, 0, 100, 0, 76);
+            if (mappedRain < 0) mappedRain = 0;
+            d->fillRect(42, 34, mappedRain, 6, SSD1306_WHITE);
+
+            // Redundancy Status
+            d->setCursor(0, 52);
+            d->print("DHT Backup: ");
+            if (tempDHT > -50) d->print("OK"); else d->print("FAIL");
             break;
-        case 3: 
-            integrall.oledPrint("CALCULATED", 0, 0);
-            integrall.oledPrintValue("DewPt: ", dewPoint, 2);
-            integrall.oledPrintValue("HeatIdx: ", heatIndex, 3);
+        }
+        case 3: {
+            d->print("SYSTEM STATUS");
+            d->setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+            d->setTextSize(1);
+
+            d->setCursor(0, 20);
+            if (integrall.isWiFiConnected()) {
+                d->print("WiFi: CONNECTED");
+                d->setCursor(0, 35);
+                d->print("IP: ");
+                d->print(integrall.getIPAddress());
+                
+                // Draw cool wifi waves
+                d->drawArc(110, 40, 4, 180, 270, SSD1306_WHITE);
+                d->drawArc(110, 40, 8, 180, 270, SSD1306_WHITE);
+                d->fillCircle(110, 40, 2, SSD1306_WHITE);
+            } else {
+                d->print("WiFi: SEARCHING...");
+            }
             break;
+        }
     }
+    
+    // Draw screen indicator dots at the bottom
+    for (int i=0; i<4; i++) {
+        if(i == screen) {
+            d->fillRect(50 + (i*8), 60, 6, 4, SSD1306_WHITE);
+        } else {
+            d->drawRect(50 + (i*8), 60, 6, 4, SSD1306_WHITE);
+        }
+    }
+
+    d->display();
 }

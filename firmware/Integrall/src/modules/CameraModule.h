@@ -81,6 +81,9 @@ public:
         if (WiFi.status() == WL_CONNECTED) {
             INTEGRALL_LOG_INFO("Camera: Starting MJPEG server...");
             startServer();
+            Serial.print(">> [CAM LINK] http://");
+            Serial.print(WiFi.localIP().toString().c_str());
+            Serial.println(":81/stream");
         }
         
         return true;

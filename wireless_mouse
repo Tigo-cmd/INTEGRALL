@@ -1,0 +1,478 @@
+#include <Wire.h>
+#include <HijelHID_BLEMouse.h>
+
+// ===================== IMU HARDWARE =====================
+#define SDA_PIN 4
+#define SCL_PIN 5
+#define LSM6_ADDR 0x6B
+
+#define WHO_AM_I_REG 0x0F
+#define CTRL1_XL     0x10
+#define CTRL2_G      0x11
+#define CTRL3_C      0x12    // Control register 3 (BDU bit)
+#define OUTX_L_G     0x22
+#define OUTX_L_XL    0x28
+
+// ===================== BUTTONS =====================
+#define RESET_BTN 7
+#define LEFT_BTN  8
+#define RIGHT_BTN 9
+
+// ===================== BLE MOUSE =====================
+HijelBLEMouse mouse("ESP32 Air Mouse", "NISHA");
+
+// ===================== BUTTON TIMING =====================
+const unsigned long debounceDelay = 35;
+const unsigned long clickMaxTime = 250;
+const unsigned long dragHoldTime = 200;
+
+// ===================== CURSOR TUNING =====================
+//
+// HOW A REAL MOUSE WORKS (applied to gyroscope):
+//   1. A real mouse sensor measures VELOCITY (how fast you move).
+//   2. The gyroscope also measures angular VELOCITY (degrees/sec).
+//   3. To get cursor DISPLACEMENT (pixels), you compute:
+//        displacement = angularVelocity_dps * deltaTime_sec * sensitivity
+//   4. This makes cursor movement consistent regardless of loop speed.
+//   5. Minimal filtering — real mice pass through raw data with only
+//      a tiny deadzone to prevent drift at rest.
+//
+// LSM6DS3 at ±250 dps: sensitivity = 8.75 mdps/LSB = 0.00875 dps/LSB
+
+const float GYRO_SENSITIVITY_DPS = 0.00875f;  // dps per raw LSB (±250 dps range)
+
+// Cursor sensitivity: pixels per degree of rotation
+// Increase for faster cursor, decrease for slower
+float cursorSensitivity = 18.0f;   // try 10.0 (slow) to 30.0 (fast)
+
+// Deadzone: raw LSB noise floor. Only needs to kill sensor noise at rest.
+// Too high = sticky feeling. Too low = cursor drifts.
+// If cursor still drifts at rest, increase this. If it feels "sticky" starting motion, decrease.
+const int gyroDeadzone = 200;
+
+// Max pixels per frame (safety clamp to prevent wild jumps)
+const float maxPixelsPerFrame = 25.0f;
+
+// Precision mode multiplier (when right button is held)
+const float precisionMultiplier = 0.35f;
+
+// Drag speed reduction
+const float dragSpeedMultiplier = 0.6f;
+
+// Drag activation threshold (pixels of motion while left-held)
+const float dragMotionThreshold = 3.0f;
+
+// ===================== DEBUG =====================
+const unsigned long debugPrintInterval = 250;
+
+// ===================== BUTTON STATE =====================
+struct Button {
+  uint8_t pin;
+  const char* name;
+  bool stableState;
+  bool lastReading;
+  unsigned long lastDebounceTime;
+  unsigned long pressTime;
+  bool pressEvent;
+  bool releaseEvent;
+};
+
+Button resetBtn = {RESET_BTN, "RESET", HIGH, HIGH, 0, 0, false, false};
+Button leftBtn  = {LEFT_BTN,  "LEFT",  HIGH, HIGH, 0, 0, false, false};
+Button rightBtn = {RIGHT_BTN, "RIGHT", HIGH, HIGH, 0, 0, false, false};
+
+// ===================== MOTION STATE =====================
+long gyroOffsetX = 0;
+long gyroOffsetY = 0;
+long gyroOffsetZ = 0;
+
+// Fractional pixel accumulator (prevents loss of sub-pixel motion)
+float accumX = 0.0f;
+float accumY = 0.0f;
+
+// Timing for velocity-to-displacement conversion
+unsigned long lastLoopTime = 0;
+
+// ===================== CLICK / DRAG STATE =====================
+bool dragActive = false;
+bool leftPressValid = false;
+float dragAccumMotion = 0.0f;   // total motion accumulated while left is held
+
+unsigned long lastDebugPrint = 0;
+
+// ===================== LOW LEVEL I2C =====================
+bool writeRegister(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(LSM6_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  return (Wire.endTransmission() == 0);
+}
+
+bool readRegisters(uint8_t startReg, uint8_t* buffer, uint8_t len) {
+  Wire.beginTransmission(LSM6_ADDR);
+  Wire.write(startReg);
+  if (Wire.endTransmission(false) != 0) return false;
+
+  uint8_t received = Wire.requestFrom(LSM6_ADDR, len);
+  if (received != len) return false;
+
+  for (uint8_t i = 0; i < len; i++) {
+    buffer[i] = Wire.read();
+  }
+  return true;
+}
+
+int16_t makeInt16(uint8_t lowByte, uint8_t highByte) {
+  return (int16_t)((highByte << 8) | lowByte);
+}
+
+bool readRawGyro(int16_t &gx, int16_t &gy, int16_t &gz) {
+  uint8_t gData[6];
+  if (!readRegisters(OUTX_L_G, gData, 6)) return false;
+
+  gx = makeInt16(gData[0], gData[1]);
+  gy = makeInt16(gData[2], gData[3]);
+  gz = makeInt16(gData[4], gData[5]);
+  return true;
+}
+
+// ===================== CALIBRATION =====================
+void calibrateGyro() {
+  Serial.println("Calibrating gyro... keep device still");
+
+  const int samples = 400;
+  long sumX = 0, sumY = 0, sumZ = 0;
+  int validSamples = 0;
+
+  for (int i = 0; i < samples; i++) {
+    int16_t gx, gy, gz;
+    if (readRawGyro(gx, gy, gz)) {
+      sumX += gx;
+      sumY += gy;
+      sumZ += gz;
+      validSamples++;
+    }
+    delay(3);
+  }
+
+  if (validSamples > 0) {
+    gyroOffsetX = sumX / validSamples;
+    gyroOffsetY = sumY / validSamples;
+    gyroOffsetZ = sumZ / validSamples;
+  }
+
+  // Reset all motion state
+  accumX = 0.0f;
+  accumY = 0.0f;
+  dragActive = false;
+  leftPressValid = false;
+  dragAccumMotion = 0.0f;
+  lastLoopTime = millis();
+
+  Serial.print("Gyro offsets -> X: ");
+  Serial.print(gyroOffsetX);
+  Serial.print("  Y: ");
+  Serial.print(gyroOffsetY);
+  Serial.print("  Z: ");
+  Serial.println(gyroOffsetZ);
+}
+
+// ===================== BUTTON UPDATE =====================
+void updateButton(Button &btn) {
+  btn.pressEvent = false;
+  btn.releaseEvent = false;
+
+  bool reading = digitalRead(btn.pin);
+
+  if (reading != btn.lastReading) {
+    btn.lastDebounceTime = millis();
+  }
+
+  if ((millis() - btn.lastDebounceTime) > debounceDelay) {
+    if (reading != btn.stableState) {
+      btn.stableState = reading;
+
+      if (btn.stableState == LOW) {
+        btn.pressTime = millis();
+        btn.pressEvent = true;
+      } else {
+        btn.releaseEvent = true;
+      }
+    }
+  }
+
+  btn.lastReading = reading;
+}
+
+// ===================== SETUP =====================
+void setup() {
+  Serial.begin(115200);
+  delay(2000);
+
+  pinMode(RESET_BTN, INPUT_PULLUP);
+  pinMode(LEFT_BTN, INPUT_PULLUP);
+  pinMode(RIGHT_BTN, INPUT_PULLUP);
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+  delay(100);
+
+  // Verify sensor identity
+  uint8_t who = 0;
+  if (!readRegisters(WHO_AM_I_REG, &who, 1)) {
+    Serial.println("ERROR: Failed to read WHO_AM_I");
+    while (1) delay(100);
+  }
+
+  Serial.print("WHO_AM_I = 0x");
+  if (who < 16) Serial.print("0");
+  Serial.println(who, HEX);
+
+  if (who != 0x69) {
+    Serial.println("ERROR: Unexpected sensor ID");
+    while (1) delay(100);
+  }
+
+  // Configure accelerometer: ODR 104 Hz, ±2g  (0x40)
+  if (!writeRegister(CTRL1_XL, 0x40)) {
+    Serial.println("ERROR: Failed to configure accelerometer");
+    while (1) delay(100);
+  }
+
+  // Configure gyroscope: ODR 104 Hz, ±250 dps  (0x40)
+  if (!writeRegister(CTRL2_G, 0x40)) {
+    Serial.println("ERROR: Failed to configure gyroscope");
+    while (1) delay(100);
+  }
+
+  // Enable Block Data Update (BDU) — prevents reading half-updated data
+  // CTRL3_C: bit 6 = BDU. Read-modify-write to preserve other bits.
+  uint8_t ctrl3 = 0;
+  readRegisters(CTRL3_C, &ctrl3, 1);
+  ctrl3 |= 0x40;  // Set BDU bit
+  writeRegister(CTRL3_C, ctrl3);
+
+  calibrateGyro();
+
+  mouse.begin();
+  Serial.println("BLE mouse ready. Advertising...");
+}
+
+// ===================== LOOP =====================
+void loop() {
+  // --- Timing ---
+  unsigned long now = millis();
+  float dt = (now - lastLoopTime) / 1000.0f;  // seconds since last frame
+  lastLoopTime = now;
+
+  // Sanity: if dt is absurd (e.g. first frame, or after calibration), skip
+  if (dt <= 0.0f || dt > 0.1f) {
+    dt = 0.01f;  // fallback to ~100 Hz assumption
+  }
+
+  // --- Buttons ---
+  updateButton(resetBtn);
+  updateButton(leftBtn);
+  updateButton(rightBtn);
+
+  // ---------- RESET ----------
+  if (resetBtn.pressEvent) {
+    Serial.println("[RESET] recalibrate");
+    calibrateGyro();
+    return;  // skip this frame
+  }
+
+  // ---------- READ GYRO ----------
+  int16_t rawGX, rawGY, rawGZ;
+  if (!readRawGyro(rawGX, rawGY, rawGZ)) {
+    delay(2);
+    return;
+  }
+
+  // ---------- OFFSET CORRECTION ----------
+  long corrGX = rawGX - gyroOffsetX;
+  long corrGY = rawGY - gyroOffsetY;
+
+  // ---------- DEADZONE (minimal — just kills sensor noise at rest) ----------
+  if (abs(corrGX) < gyroDeadzone) corrGX = 0;
+  if (abs(corrGY) < gyroDeadzone) corrGY = 0;
+
+  // ---------- CONVERT TO DEGREES PER SECOND ----------
+  // This is the actual angular velocity the user is producing
+  float dpsX = corrGX * GYRO_SENSITIVITY_DPS;  // degrees/sec around X axis
+  float dpsY = corrGY * GYRO_SENSITIVITY_DPS;  // degrees/sec around Y axis
+
+  // ---------- VELOCITY → DISPLACEMENT ----------
+  // displacement_pixels = angular_velocity_dps * dt * sensitivity
+  // This is how a real mouse works: faster motion = more pixels, proportional to time.
+  float sensitivity = cursorSensitivity;
+
+  // Precision mode (right button held)
+  if (rightBtn.stableState == LOW) {
+    sensitivity *= precisionMultiplier;
+  }
+
+  // Drag mode slows down for control
+  if (dragActive) {
+    sensitivity *= dragSpeedMultiplier;
+  }
+
+  // Compute pixel displacement this frame
+  // Axis mapping: Gyro Y rotation → cursor X movement (yaw = left/right)
+  //               Gyro X rotation → cursor Y movement (pitch = up/down)
+  // NOTE: Signs are tuned so that:
+  //   Tilt device RIGHT  → cursor moves RIGHT (+X)
+  //   Tilt device UP     → cursor moves UP    (-Y on screen)
+  float pixelsX = -dpsY * dt * sensitivity;
+  float pixelsY = -dpsX * dt * sensitivity;
+
+  // ---------- ACCUMULATE SUB-PIXEL FRACTIONS ----------
+  // A real mouse accumulates fractional pixels so slow movements still register
+  accumX += pixelsX;
+  accumY += pixelsY;
+
+  // Extract the integer part to send, keep the fraction for next frame
+  int dx = (int)accumX;
+  int dy = (int)accumY;
+  accumX -= dx;
+  accumY -= dy;
+
+  // Safety clamp (prevent insane jumps from noise spikes)
+  dx = constrain(dx, (int)-maxPixelsPerFrame, (int)maxPixelsPerFrame);
+  dy = constrain(dy, (int)-maxPixelsPerFrame, (int)maxPixelsPerFrame);
+
+  bool hasMoved = (dx != 0 || dy != 0);
+  float motionMagnitude = abs(pixelsX) + abs(pixelsY);
+
+  // ===================== LEFT BUTTON =====================
+  if (leftBtn.pressEvent) {
+    leftPressValid = true;
+    dragAccumMotion = 0.0f;
+    Serial.println("[LEFT] PRESSED");
+  }
+
+  if (leftBtn.stableState == LOW) {
+    // Accumulate total motion while left is held
+    dragAccumMotion += motionMagnitude;
+
+    // Transition to drag if held long enough AND moved enough
+    if (!dragActive &&
+        (millis() - leftBtn.pressTime >= dragHoldTime) &&
+        (dragAccumMotion >= dragMotionThreshold)) {
+
+      dragActive = true;
+
+      if (mouse.isPaired()) {
+        mouse.press(MouseButton::Left);
+      }
+
+      Serial.println("[DRAG] START");
+    }
+  }
+
+  if (leftBtn.releaseEvent) {
+    unsigned long pressDuration = millis() - leftBtn.pressTime;
+
+    if (dragActive) {
+      dragActive = false;
+
+      if (mouse.isPaired()) {
+        mouse.release(MouseButton::Left);
+      }
+
+      Serial.println("[DRAG] STOP");
+
+    } else if (leftPressValid && dragAccumMotion < dragMotionThreshold && pressDuration <= clickMaxTime) {
+
+      if (mouse.isPaired()) {
+        mouse.click(MouseButton::Left);
+      }
+
+      Serial.println("[LEFT] CLICK");
+
+    } else {
+      Serial.println("[LEFT] RELEASE (no action)");
+    }
+
+    leftPressValid = false;
+    dragAccumMotion = 0.0f;
+  }
+
+  // ===================== RIGHT BUTTON =====================
+  if (rightBtn.pressEvent) {
+    Serial.println("[RIGHT] PRESSED (precision mode ON)");
+  }
+
+  if (rightBtn.releaseEvent) {
+    unsigned long pressDuration = millis() - rightBtn.pressTime;
+
+    if (pressDuration <= clickMaxTime) {
+      if (mouse.isPaired()) {
+        mouse.click(MouseButton::Right);
+      }
+      Serial.println("[RIGHT] CLICK");
+    } else {
+      Serial.println("[RIGHT] RELEASE (precision mode OFF)");
+    }
+  }
+
+  // ===================== SEND CURSOR MOVEMENT =====================
+  if (mouse.isPaired() && hasMoved) {
+    mouse.move(dx, dy);
+  }
+
+  // ===================== SERIAL MONITOR DASHBOARD =====================
+  if (millis() - lastDebugPrint >= debugPrintInterval) {
+    lastDebugPrint = millis();
+
+    Serial.println("─────────────────────────────────────────");
+
+    // Row 1: Raw gyro readings (before offset correction)
+    Serial.print("RAW  gX=");
+    Serial.print(rawGX);
+    Serial.print("  gY=");
+    Serial.print(rawGY);
+    Serial.print("  gZ=");
+    Serial.println(rawGZ);
+
+    // Row 2: After offset correction + deadzone
+    Serial.print("CORR gX=");
+    Serial.print(corrGX);
+    Serial.print("  gY=");
+    Serial.println(corrGY);
+
+    // Row 3: Angular velocity (degrees per second)
+    Serial.print("DPS  X=");
+    Serial.print(dpsX, 2);
+    Serial.print("  Y=");
+    Serial.println(dpsY, 2);
+
+    // Row 4: Pixel displacement sent this frame
+    Serial.print("MOVE dx=");
+    Serial.print(dx);
+    Serial.print("  dy=");
+    Serial.print(dy);
+    Serial.print("  (sub-px: ");
+    Serial.print(accumX, 3);
+    Serial.print(", ");
+    Serial.print(accumY, 3);
+    Serial.println(")");
+
+    // Row 5: Timing
+    Serial.print("TIME dt=");
+    Serial.print(dt * 1000.0f, 1);
+    Serial.println("ms");
+
+    // Row 6: Status
+    Serial.print("STATUS paired=");
+    Serial.print(mouse.isPaired() ? "YES" : "NO");
+    Serial.print("  drag=");
+    Serial.print(dragActive ? "ON" : "OFF");
+    Serial.print("  L=");
+    Serial.print(leftBtn.stableState == LOW ? "HELD" : "--");
+    Serial.print("  R=");
+    Serial.println(rightBtn.stableState == LOW ? "HELD" : "--");
+  }
+
+  // No fixed delay — let the loop run as fast as the sensor produces data (~104 Hz)
+  // This is intentional: dt-based math makes speed independent of loop rate
+}
