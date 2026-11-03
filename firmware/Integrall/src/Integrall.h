@@ -303,9 +303,12 @@ public:
     bool relayIsOn(int relay_index);
     
     /**
-     * Turn all relays off
+     * Turn all relays off / on and inspect statistics
      */
     void allRelaysOff();
+    void allRelaysOn() { _relay_module.allOn(); }
+    uint32_t relayGetOnTime(int relay_index) const { return (relay_index >= 0 && relay_index < _relay_count) ? _relay_module.getTotalOnTime(relay_index) : 0; }
+    uint8_t  relayGetToggleCount(int relay_index) const { return (relay_index >= 0 && relay_index < _relay_count) ? _relay_module.getToggleCount(relay_index) : 0; }
     
     #endif  // INTEGRALL_MODULE_RELAY_ENABLED
     
@@ -382,22 +385,37 @@ public:
     float readDistance(uint8_t trig, uint8_t echo, uint8_t samples = 3) {
         return _sensor_module.readDistanceCM(trig, echo, samples);
     }
-    
+
+    float readDistanceCM(uint8_t trig, uint8_t echo, uint8_t samples = 3) {
+        return _sensor_module.readDistanceCM(trig, echo, samples);
+    }
+
     /**
-     * Easy proximity alert
-     * Returns true if object is closer than threshold
+     * Easy proximity alert / range check
      */
     bool isNear(uint8_t trig, uint8_t echo, float threshold_cm) {
         return _sensor_module.isWithinRange(trig, echo, 0, threshold_cm);
     }
-    
+
+    bool isWithinRange(uint8_t trig, uint8_t echo, float min_cm, float max_cm) {
+        return _sensor_module.isWithinRange(trig, echo, min_cm, max_cm);
+    }
+
     /**
-     * Read analog input as a percentage (0-100)
+     * Read analog input as a percentage (0-100) or voltage
      */
     int readAnalogPercent(uint8_t pin) {
         return _sensor_module.readAnalogPercent(pin);
     }
-    
+
+    int readPercent(uint8_t pin, bool inverted = false) {
+        return _sensor_module.readPercent(pin, inverted);
+    }
+
+    float readPinVoltage(uint8_t pin, uint8_t samples = 5) {
+        return _sensor_module.readPinVoltage(pin, samples);
+    }
+
     /**
      * Read LDR light intensity as a percentage (0-100)
      * @param reverse Set to true if 0=Bright (common with pull-up LDRs)
@@ -405,48 +423,105 @@ public:
     int readLightPercent(uint8_t pin, bool reverse = false) {
         return _sensor_module.readLightPercent(pin, reverse);
     }
-    
-    /**
-     * Read digital sensor like PIR Motion
-     */
-    bool isTriggered(uint8_t pin) {
-        return _sensor_module.isTriggered(pin);
-    }
 
     /**
-     * Specialized Motion Detection
+     * Digital & Security Sensor Triggers (PIR, Flame, Tilt, Reed Door Switch, Vibration, Sound, Hall, Touch)
      */
-    bool motionDetected(uint8_t pin) {
-        return _sensor_module.motionDetected(pin);
+    bool isTriggered(uint8_t pin, bool activeHigh = true) {
+        return _sensor_module.isTriggered(pin, activeHigh);
     }
 
+    bool motionDetected(uint8_t pin)                        { return _sensor_module.motionDetected(pin); }
+    bool flameDetected(uint8_t pin, bool activeLow = true)  { return _sensor_module.flameDetected(pin, activeLow); }
+    bool tiltDetected(uint8_t pin, bool activeLow = true)   { return _sensor_module.tiltDetected(pin, activeLow); }
+    bool vibrationDetected(uint8_t pin, bool activeHigh = true) { return _sensor_module.vibrationDetected(pin, activeHigh); }
+    bool soundDetected(uint8_t pin, bool activeLow = true)  { return _sensor_module.soundDetected(pin, activeLow); }
+    bool magneticDetected(uint8_t pin, bool activeLow = true) { return _sensor_module.magneticDetected(pin, activeLow); }
+    bool touchDetected(uint8_t pin, bool activeHigh = true) { return _sensor_module.touchDetected(pin, activeHigh); }
+    bool doorOpen(uint8_t pin, bool usePullup = true)       { return _sensor_module.doorOpen(pin, usePullup); }
+
     /**
-     * Read DS18B20 Probe Temperature
+     * Soil Moisture & Rain / Water Level Sensors
+     */
+    int  readSoilMoisture(uint8_t pin, int dryRaw = -1, int wetRaw = -1) { return _sensor_module.readSoilMoisture(pin, dryRaw, wetRaw); }
+    int  readRainPercent(uint8_t pin, bool activeLow = true)             { return _sensor_module.readRainPercent(pin, activeLow); }
+    bool isRaining(uint8_t pin, int thresholdPct = 30, bool activeLow = true) { return _sensor_module.isRaining(pin, thresholdPct, activeLow); }
+
+    /**
+     * Temperature & Environmental Sensors (DS18B20, BME280, BMP280, DHT11/22, SHT3x, NTC Thermistor, LM35, TMP36)
      */
     float readProbeTemp(uint8_t pin, bool celsius = true) {
         return _sensor_module.readProbeTemp(pin, celsius);
     }
 
-    /**
-     * Read BME280 Environment
-     */
     void readEnvironment(uint8_t addr, float &temp, float &hum, float &pres) {
         _sensor_module.readEnvironment(addr, temp, hum, pres);
     }
 
-    /**
-     * Read DHT Temperature
-     */
+    float readPressure(uint8_t addr = 0x76) {
+        return _sensor_module.readPressure(addr);
+    }
+
     float readTemperature(uint8_t pin, uint8_t type = 11, bool celsius = true) {
         return _sensor_module.readTemperature(pin, type, celsius);
     }
 
-    /**
-     * Read DHT Humidity
-     */
     float readHumidity(uint8_t pin, uint8_t type = 11) {
         return _sensor_module.readHumidity(pin, type);
     }
+
+    bool readSHT3x(uint8_t addr, float &tempC, float &humidity) {
+        return _sensor_module.readSHT3x(addr, tempC, humidity);
+    }
+
+    float readThermistorC(uint8_t pin, float beta = 3950.0f, float r0 = 10000.0f, float seriesR = 10000.0f, bool ntcToGnd = true) {
+        return _sensor_module.readThermistorC(pin, beta, r0, seriesR, ntcToGnd);
+    }
+
+    float readLM35C(uint8_t pin)  { return _sensor_module.readLM35C(pin); }
+    float readTMP36C(uint8_t pin) { return _sensor_module.readTMP36C(pin); }
+
+    /**
+     * Light, UV, Color & Optical Distance Sensors (BH1750, GUVA-S12SD, TCS3200, Sharp IR, VL53L0X ToF)
+     */
+    float readLux(uint8_t addr = 0x23) { return _sensor_module.readLux(addr); }
+    float readUVIndex(uint8_t pin)     { return _sensor_module.readUVIndex(pin); }
+    void  readColorRGB(uint8_t s2Pin, uint8_t s3Pin, uint8_t outPin, uint8_t &r, uint8_t &g, uint8_t &b) {
+        _sensor_module.readColorRGB(s2Pin, s3Pin, outPin, r, g, b);
+    }
+    float readIRDistanceCM(uint8_t pin) { return _sensor_module.readIRDistanceCM(pin); }
+    int   readLaserDistanceMM()         { return _sensor_module.readLaserDistanceMM(); }
+
+    /**
+     * Air Quality, Gas, Smoke, PM2.5 Dust & CO2 Sensors (MQ-2/4/7/135, GP2Y1010AU0F, MH-Z19B)
+     */
+    float readGasPPM(uint8_t pin, float r0 = 10.0f, float rl = 10.0f, float a = 116.602f, float b = -2.769f) {
+        return _sensor_module.readGasPPM(pin, r0, rl, a, b);
+    }
+    float readDustDensity(uint8_t ledPin, uint8_t analogPin) {
+        return _sensor_module.readDustDensity(ledPin, analogPin);
+    }
+    int readCO2PWM(uint8_t pwmPin, int rangePPM = 5000) {
+        return _sensor_module.readCO2PWM(pwmPin, rangePPM);
+    }
+
+    /**
+     * Water Quality & Liquid Flow Sensors (TDS, pH, Turbidity NTU, YF-S201 Flow Rate)
+     */
+    float readTDS(uint8_t pin, float waterTempC = 25.0f) { return _sensor_module.readTDS(pin, waterTempC); }
+    float readPH(uint8_t pin, float neutralVoltage = 2.50f, float slope = -5.70f) { return _sensor_module.readPH(pin, neutralVoltage, slope); }
+    float readTurbidityNTU(uint8_t pin) { return _sensor_module.readTurbidityNTU(pin); }
+    float readWaterFlowLPM(uint8_t pin, float calibrationFactor = 7.5f) { return _sensor_module.readWaterFlowLPM(pin, calibrationFactor); }
+
+    /**
+     * Load Cell Weight (HX711), Current (ACS712 AC/DC), Voltage Divider & Heart-Rate Pulse Sensors
+     */
+    long  readWeightRaw(uint8_t doutPin, uint8_t sckPin, uint32_t timeoutMs = 200) { return _sensor_module.readWeightRaw(doutPin, sckPin, timeoutMs); }
+    float readWeightGrams(uint8_t doutPin, uint8_t sckPin, long tareOffset = 0, float scaleFactor = 420.0f) { return _sensor_module.readWeightGrams(doutPin, sckPin, tareOffset, scaleFactor); }
+    float readCurrentDC(uint8_t pin, float sensitivityMvPerA = 185.0f, float zeroPointV = -1.0f) { return _sensor_module.readCurrentDC(pin, sensitivityMvPerA, zeroPointV); }
+    float readCurrentAC(uint8_t pin, float sensitivityMvPerA = 185.0f, uint16_t windowMs = 20) { return _sensor_module.readCurrentAC(pin, sensitivityMvPerA, windowMs); }
+    float readVoltageDivider(uint8_t pin, float dividerRatio = 5.0f) { return _sensor_module.readVoltageDivider(pin, dividerRatio); }
+    int   readHeartPulsePercent(uint8_t pin) { return _sensor_module.readHeartPulsePercent(pin); }
 
     /**
      * Atmosphere Math helpers
@@ -489,7 +564,11 @@ public:
     bool isHorizontal() {
         return _sensor_module.isHorizontal();
     }
-    
+
+    float getPitch() { return _sensor_module.getPitch(); }
+    float getRoll()  { return _sensor_module.getRoll(); }
+    float getIMUTemperature() { return _sensor_module.getIMUTemperature(); }
+
     #endif // INTEGRALL_MODULE_IMU_ENABLED
 
     // ========================================================================
@@ -767,6 +846,7 @@ public:
 
     bool enableBuzzer(uint8_t pin) { return _buzzer_module.begin(pin); }
     void buzzerBeep(uint32_t ms = 200)                          { _buzzer_module.beep(ms); }
+    void buzzerTone(uint16_t freq, uint32_t ms = 200)           { _buzzer_module.customTone(freq, ms); }
     void buzzerPattern(uint8_t n, uint32_t on = 150, uint32_t off = 100) { _buzzer_module.pattern(n, on, off); }
     void buzzerAlert()   { _buzzer_module.alert(); }
     void buzzerSuccess() { _buzzer_module.success(); }
@@ -776,9 +856,10 @@ public:
     void buzzerSuccess() {}
     void buzzerFail()    {}
     void buzzerOff()     {}
-    bool enableBuzzer(uint8_t pin) { return false; }
-    void buzzerBeep(uint32_t ms = 200) {}
-    void buzzerPattern(uint8_t n, uint32_t on = 150, uint32_t off = 100) {}
+    bool enableBuzzer(uint8_t pin) { (void)pin; return false; }
+    void buzzerBeep(uint32_t ms = 200) { (void)ms; }
+    void buzzerTone(uint16_t freq, uint32_t ms = 200) { (void)freq; (void)ms; }
+    void buzzerPattern(uint8_t n, uint32_t on = 150, uint32_t off = 100) { (void)n; (void)on; (void)off; }
     void buzzerAlert()   {}
     #endif
 

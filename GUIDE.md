@@ -133,19 +133,48 @@ Works identically on **ESP32** and **Arduino Uno/Nano** (auto-swaps hardware tim
   integrall.easeServo(claw, 180, 15);
   ```
 
-### 3. Sensors (Ultrasonic, PIR, Analog)
-No more complex math or timing logic.
-- **Setup**: `#define INTEGRALL_ENABLE_SENSORS`
-- **Smart Features**:
-  - `float cm = integrall.readDistance(trig, echo, samples);` - Measures distance. The `samples` parameter (default 3) automatically filters out noise for a stable reading.
-  - `bool near = integrall.isNear(trig, echo, threshold_cm);` - One-liner proximity alert. Returns `true` if an object is closer than the threshold.
-  - `int light = integrall.readLightPercent(A0);` - Read LDR light intensity.
-  - `int raw = integrall.readAnalogPercent(A0);` - Returns a clean 0-100% value from any analog sensor.
-  - `bool motion = integrall.motionDetected(PIR_PIN);` - Semantic motion sensing.
-  - `float waterTemp = integrall.readProbeTemp(PROBE_PIN);` - Read DS18B20 waterproof sensors. *(Requires DallasTemperature library)*
-  - `float t, h, p; integrall.readEnvironment(addr, t, h, p);` - High-precision BME280 monitoring. *(Requires Adafruit_BME280 library)*
-  - `float t = integrall.readTemperature(pin, type);` - DHT temperature reading. *(Requires DHT library)*
-  - `float h = integrall.readHumidity(pin, type);` - DHT humidity reading. *(Requires DHT library)*
+### 3. Universal Sensor & IMU Engine (30+ Sensors)
+No more complex math, calibration curves, or timing logic.
+- **Setup**: `#define INTEGRALL_ENABLE_SENSORS` (and `#define INTEGRALL_ENABLE_IMU` for MPU6050)
+- **Temperature & Climate**:
+  - `float t = integrall.readTemperature(pin, type);` / `integrall.readHumidity(pin, type);` - DHT11/DHT22.
+  - `float waterTemp = integrall.readProbeTemp(pin);` - DS18B20 waterproof probe.
+  - `float t, h, p; integrall.readEnvironment(addr, t, h, p);` - BME280 (Temp, Humidity, Pressure hPa).
+  - `float p = integrall.readPressure(addr);` - BMP280 / BME280 pressure in hPa.
+  - `float t, h; integrall.readSHT3x(0x44, t, h);` - Native I2C SHT30/SHT31/SHT35 (no external library needed).
+  - `float t = integrall.readThermistorC(pin, beta, r0, seriesR);` - NTC Thermistor (Steinhart-Hart Beta equation).
+  - `float t = integrall.readLM35C(pin);` / `integrall.readTMP36C(pin);` - Linear analog temperature sensors.
+  - `integrall.calculateDewPoint(t, h);` / `integrall.calculateHeatIndex(t, h);` / `integrall.calculateAltitude(p);` - Psychrometric math.
+- **Light, Lux, UV & Color**:
+  - `int light = integrall.readLightPercent(pin, reverse);` - LDR light intensity (0-100%).
+  - `float lux = integrall.readLux(0x23);` - BH1750 digital ambient light sensor in Lux (native I2C).
+  - `float uv = integrall.readUVIndex(pin);` - GUVA-S12SD / ML8511 UV Index (0.0-15.0).
+  - `uint8_t r, g, b; integrall.readColorRGB(s2, s3, out, r, g, b);` - TCS3200/TCS230 RGB color sensor.
+- **Distance, IR & Laser Time-of-Flight (ToF)**:
+  - `float cm = integrall.readDistanceCM(trig, echo, samples);` - Multi-sample filtered HC-SR04 ultrasonic.
+  - `bool near = integrall.isNear(trig, echo, threshold_cm);` / `integrall.isWithinRange(trig, echo, min_cm, max_cm);`
+  - `float irCm = integrall.readIRDistanceCM(pin);` - Sharp GP2Y0A21 analog IR distance (10-80 cm).
+  - `int mm = integrall.readLaserDistanceMM();` - VL53L0X Laser ToF distance in millimeters.
+- **Air Quality, Gas, PM2.5 Dust & CO2**:
+  - `int pct = integrall.readAnalogPercent(pin);` - Raw 0-100% analog level.
+  - `float ppm = integrall.readGasPPM(pin, r0, rl, a, b);` - Calibrated MQ-2/4/7/135 gas concentration in PPM.
+  - `float ug = integrall.readDustDensity(ledPin, analogPin);` - Sharp GP2Y1010AU0F PM2.5 optical dust density (µg/m³).
+  - `int co2 = integrall.readCO2PWM(pwmPin, 5000);` - MH-Z19B NDIR CO2 concentration (ppm).
+- **Soil, Agriculture, Water Quality & Liquid Flow**:
+  - `int soil = integrall.readSoilMoisture(pin, dryRaw, wetRaw);` - Calibrated capacitive/resistive soil moisture (0-100%).
+  - `int rain = integrall.readRainPercent(pin);` / `bool wet = integrall.isRaining(pin, 30);` - Rain & water leak detection.
+  - `float tds = integrall.readTDS(pin, waterTempC);` - Temperature-compensated TDS water purity (ppm).
+  - `float ph = integrall.readPH(pin);` - Analog pH probe (0.0-14.0 pH).
+  - `float ntu = integrall.readTurbidityNTU(pin);` - Water cloudiness in NTU (0-3000).
+  - `float lpm = integrall.readWaterFlowLPM(pin, 7.5);` - YF-S201 turbine water flow rate (L/min).
+- **Weight (HX711), Current (ACS712), Voltage & Heart Pulse**:
+  - `long raw = integrall.readWeightRaw(dout, sck);` / `float g = integrall.readWeightGrams(dout, sck, tare, scale);` - Native 24-bit HX711 load cell driver.
+  - `float aDC = integrall.readCurrentDC(pin, 185.0);` / `float aAC = integrall.readCurrentAC(pin, 185.0);` - ACS712 DC and AC RMS current (Amps).
+  - `float v = integrall.readVoltageDivider(pin, 5.0);` - DC voltage sensor (0-25V divider).
+  - `int pulse = integrall.readHeartPulsePercent(pin);` - Analog PPG heart pulse sensor.
+- **Security Triggers & 6-Axis IMU (MPU6050)**:
+  - `integrall.motionDetected(pin)`, `flameDetected(pin)`, `doorOpen(pin)`, `vibrationDetected(pin)`, `soundDetected(pin)`, `tiltDetected(pin)`, `magneticDetected(pin)`, `touchDetected(pin)`.
+  - `integrall.enableIMU(sda, scl)`, `getImpactForce()`, `getPitch()`, `getRoll()`, `getPosture()`, `isHorizontal()`, `getIMUTemperature()`.
 
 ### 4. Smart Relays
 Standard relay control with professional safety features.

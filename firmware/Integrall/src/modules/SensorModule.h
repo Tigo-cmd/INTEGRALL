@@ -15,6 +15,13 @@
 #include <Arduino.h>
 #include <math.h>
 
+#if __has_include(<Wire.h>)
+#include <Wire.h>
+#define INTEGRALL_WIRE_AVAILABLE 1
+#else
+#define INTEGRALL_WIRE_AVAILABLE 0
+#endif
+
 // DHT sensor support (no conflict with camera)
 #if __has_include(<DHT.h>)
 #include <DHT.h>
@@ -35,7 +42,6 @@
 // BME280 support — Adafruit_Sensor.h conflicts with esp_camera.h (both define sensor_t)
 // so we exclude it when the camera module is enabled
 #if !INTEGRALL_MODULE_CAMERA_ENABLED && __has_include(<Adafruit_Sensor.h>) && __has_include(<Adafruit_BME280.h>)
-#include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #define INTEGRALL_BME280_AVAILABLE 1
@@ -43,9 +49,25 @@
 #define INTEGRALL_BME280_AVAILABLE 0
 #endif
 
+// BMP280 support
+#if !INTEGRALL_MODULE_CAMERA_ENABLED && __has_include(<Adafruit_Sensor.h>) && __has_include(<Adafruit_BMP280.h>)
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP280.h>
+#define INTEGRALL_BMP280_AVAILABLE 1
+#else
+#define INTEGRALL_BMP280_AVAILABLE 0
+#endif
+
+// VL53L0X Laser Time-of-Flight (ToF) distance sensor support
+#if !INTEGRALL_MODULE_CAMERA_ENABLED && __has_include(<Adafruit_VL53L0X.h>)
+#include <Adafruit_VL53L0X.h>
+#define INTEGRALL_VL53L0X_AVAILABLE 1
+#else
+#define INTEGRALL_VL53L0X_AVAILABLE 0
+#endif
+
 // MPU6050 IMU support — also uses Adafruit_Sensor.h
 #if INTEGRALL_MODULE_IMU_ENABLED && !INTEGRALL_MODULE_CAMERA_ENABLED && __has_include(<Adafruit_MPU6050.h>)
-#include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_MPU6050.h>
 #define INTEGRALL_MPU6050_AVAILABLE 1
@@ -70,6 +92,44 @@ public:
         #if INTEGRALL_BME280_AVAILABLE
         if (_bme) { delete _bme; _bme = nullptr; }
         #endif
+        #if INTEGRALL_BMP280_AVAILABLE
+        if (_bmp) { delete _bmp; _bmp = nullptr; }
+        #endif
+        #if INTEGRALL_VL53L0X_AVAILABLE
+        if (_tof) { delete _tof; _tof = nullptr; }
+        #endif
+    }
+
+    /**
+     * Platform-aware ADC resolution and reference voltage helpers
+     */
+    static constexpr int getAdcMax() {
+        #if defined(ESP32)
+        return 4095;
+        #else
+        return 1023;
+        #endif
+    }
+
+    static constexpr float getAdcRefVoltage() {
+        #if defined(ESP32) || defined(ESP8266)
+        return 3.3f;
+        #else
+        return 5.0f;
+        #endif
+    }
+
+    /**
+     * Read averaged analog voltage on a pin
+     */
+    float readPinVoltage(uint8_t pin, uint8_t samples = 5, float vRef = getAdcRefVoltage()) {
+        if (samples == 0) samples = 1;
+        long sum = 0;
+        for (uint8_t i = 0; i < samples; i++) {
+            sum += analogRead(pin);
+        }
+        float avg = (float)sum / (float)samples;
+        return (avg * vRef) / (float)getAdcMax();
     }
 
     /**
@@ -189,11 +249,391 @@ public:
     bool motionDetected(uint8_t pin) { return isTriggered(pin, true); }
 
     /**
+     * Semantic digital sensor helpers (Flame, Tilt, Reed Door Switch, Vibration, Sound, Hall Effect)
+     */
+    bool flameDetected(uint8_t pin, bool activeLow = true)     { return isTriggered(pin, !activeLow); }
+    bool tiltDetected(uint8_t pin, bool activeLow = true)      { return isTriggered(pin, !activeLow); }
+    bool vibrationDetected(uint8_t pin, bool activeHigh = true){ return isTriggered(pin, activeHigh); }
+    bool soundDetected(uint8_t pin, bool activeLow = true)     { return isTriggered(pin, !activeLow); }
+    bool magneticDetected(uint8_t pin, bool activeLow = true)  { return isTriggered(pin, !activeLow); }
+    bool touchDetected(uint8_t pin, bool activeHigh = true)    { return isTriggered(pin, activeHigh); }
+
+    /**
+     * Check if a magnetic reed door/window switch is open (uses INPUT_PULLUP by default)
+     */
+    bool doorOpen(uint8_t pin, bool usePullup = true) {
+        pinMode(pin, usePullup ? INPUT_PULLUP : INPUT);
+        return (digitalRead(pin) == HIGH);
+    }
+
+    /**
      * Read Soil Moisture or MQ Gas sensors (normalized to 0-100%)
      */
     int readPercent(uint8_t pin, bool inverted = false) {
         int p = readAnalogPercent(pin);
         return inverted ? (100 - p) : p;
+    }
+
+    /**
+     * Read Capacitive or Resistive Soil Moisture (0-100%)
+     * Supports optional dry/wet raw ADC calibration points; defaults to inverted analog percent.
+     */
+    int readSoilMoisture(uint8_t pin, int dryRaw = -1, int wetRaw = -1) {
+        if (dryRaw >= 0 && wetRaw >= 0 && dryRaw != wetRaw) {
+            int raw = analogRead(pin);
+            int pct = map(raw, dryRaw, wetRaw, 0, 100);
+            return constrain(pct, 0, 100);
+        }
+        return readPercent(pin, true);
+    }
+
+    /**
+     * Read Rain / Water Level sensor (0-100%) and rain threshold check
+     */
+    int readRainPercent(uint8_t pin, bool activeLow = true) {
+        return readPercent(pin, activeLow);
+    }
+
+    bool isRaining(uint8_t pin, int thresholdPct = 30, bool activeLow = true) {
+        return readRainPercent(pin, activeLow) >= thresholdPct;
+    }
+
+    /**
+     * Read NTC Thermistor Temperature (°C) using Beta Steinhart-Hart equation
+     * @param pin      Analog pin connected to voltage divider
+     * @param beta     Beta coefficient (usually 3950)
+     * @param r0       Nominal resistance at 25°C (usually 10000 or 100000 ohms)
+     * @param seriesR  Series resistor value in ohms (usually 10000)
+     * @param ntcToGnd true if NTC is wired between pin and GND; false if between VCC and pin
+     */
+    float readThermistorC(uint8_t pin, float beta = 3950.0f, float r0 = 10000.0f, float seriesR = 10000.0f, bool ntcToGnd = true) {
+        int raw = analogRead(pin);
+        int adcMax = getAdcMax();
+        if (raw <= 0 || raw >= adcMax || beta <= 0.0f || r0 <= 0.0f || seriesR <= 0.0f) return -999.0f;
+        float ratio = (float)raw / (float)(adcMax - raw);
+        float rNtc = ntcToGnd ? (seriesR * ratio) : (seriesR / ratio);
+        float invT = (1.0f / 298.15f) + (logf(rNtc / r0) / beta);
+        if (invT <= 0.0f) return -999.0f;
+        return (1.0f / invT) - 273.15f;
+    }
+
+    /**
+     * Read LM35 Analog Temperature Sensor (°C, 10mV/°C)
+     */
+    float readLM35C(uint8_t pin) {
+        float v = readPinVoltage(pin, 5);
+        return v * 100.0f;
+    }
+
+    /**
+     * Read TMP36 Analog Temperature Sensor (°C, 500mV offset, 10mV/°C)
+     */
+    float readTMP36C(uint8_t pin) {
+        float v = readPinVoltage(pin, 5);
+        return (v - 0.5f) * 100.0f;
+    }
+
+    /**
+     * Read BH1750 Digital Ambient Light Sensor in Lux (I2C, 0x23 or 0x5C)
+     * Uses native I2C protocol — zero external libraries required!
+     */
+    float readLux(uint8_t addr = 0x23) {
+        #if INTEGRALL_WIRE_AVAILABLE
+        Wire.begin();
+        Wire.beginTransmission(addr);
+        Wire.write(0x10); // Continuous High-Res Mode (1 lx resolution)
+        if (Wire.endTransmission() != 0) return -1.0f;
+        if (Wire.requestFrom(addr, (uint8_t)2) != 2) return -1.0f;
+        uint16_t raw = ((uint16_t)Wire.read() << 8) | Wire.read();
+        return (float)raw / 1.2f;
+        #else
+        (void)addr;
+        return -1.0f;
+        #endif
+    }
+
+    /**
+     * Read SHT30 / SHT31 / SHT35 High-Precision I2C Temperature & Humidity Sensor (0x44 or 0x45)
+     * Uses native I2C command 0x2400 — zero external libraries required!
+     */
+    bool readSHT3x(uint8_t addr, float &tempC, float &humidity) {
+        #if INTEGRALL_WIRE_AVAILABLE
+        Wire.begin();
+        Wire.beginTransmission(addr);
+        Wire.write(0x24); // High repeatability, clock stretching disabled
+        Wire.write(0x00);
+        if (Wire.endTransmission() != 0) {
+            tempC = -999.0f; humidity = -1.0f;
+            return false;
+        }
+        delay(15);
+        if (Wire.requestFrom(addr, (uint8_t)6) != 6) {
+            tempC = -999.0f; humidity = -1.0f;
+            return false;
+        }
+        uint16_t rawT = ((uint16_t)Wire.read() << 8) | Wire.read();
+        Wire.read(); // CRC
+        uint16_t rawH = ((uint16_t)Wire.read() << 8) | Wire.read();
+        Wire.read(); // CRC
+        tempC = -45.0f + (175.0f * ((float)rawT / 65535.0f));
+        humidity = constrain(100.0f * ((float)rawH / 65535.0f), 0.0f, 100.0f);
+        return true;
+        #else
+        (void)addr;
+        tempC = -999.0f; humidity = -1.0f;
+        return false;
+        #endif
+    }
+
+    /**
+     * Read UV Index (0.0 to 15.0) from GUVA-S12SD or ML8511 analog UV sensor
+     */
+    float readUVIndex(uint8_t pin) {
+        float v = readPinVoltage(pin, 5);
+        float uv = v / 0.1f; // GUVA-S12SD standard: ~0.1V per UV Index
+        return constrain(uv, 0.0f, 15.0f);
+    }
+
+    /**
+     * Read TCS3200 / TCS230 Color Sensor RGB frequencies (normalized 0-255)
+     */
+    void readColorRGB(uint8_t s2Pin, uint8_t s3Pin, uint8_t outPin, uint8_t &r, uint8_t &g, uint8_t &b) {
+        pinMode(s2Pin, OUTPUT);
+        pinMode(s3Pin, OUTPUT);
+        pinMode(outPin, INPUT);
+
+        // Red filter (S2=LOW, S3=LOW)
+        digitalWrite(s2Pin, LOW); digitalWrite(s3Pin, LOW);
+        unsigned long pR = pulseIn(outPin, LOW, 20000UL);
+
+        // Green filter (S2=HIGH, S3=HIGH)
+        digitalWrite(s2Pin, HIGH); digitalWrite(s3Pin, HIGH);
+        unsigned long pG = pulseIn(outPin, LOW, 20000UL);
+
+        // Blue filter (S2=LOW, S3=HIGH)
+        digitalWrite(s2Pin, LOW); digitalWrite(s3Pin, HIGH);
+        unsigned long pB = pulseIn(outPin, LOW, 20000UL);
+
+        r = (pR == 0) ? 0 : (uint8_t)constrain(map((long)pR, 200, 20, 0, 255), 0, 255);
+        g = (pG == 0) ? 0 : (uint8_t)constrain(map((long)pG, 200, 20, 0, 255), 0, 255);
+        b = (pB == 0) ? 0 : (uint8_t)constrain(map((long)pB, 200, 20, 0, 255), 0, 255);
+    }
+
+    /**
+     * Read Sharp GP2Y0A21YK0F Analog IR Distance Sensor (10cm to 80cm)
+     */
+    float readIRDistanceCM(uint8_t pin) {
+        float v = readPinVoltage(pin, 5);
+        if (v < 0.25f) return 80.0f;
+        float cm = 29.988f * powf(v, -1.173f);
+        return constrain(cm, 10.0f, 80.0f);
+    }
+
+    /**
+     * Read VL53L0X Laser Time-of-Flight (ToF) Distance Sensor in millimeters
+     */
+    int readLaserDistanceMM() {
+        #if INTEGRALL_VL53L0X_AVAILABLE
+        if (!_tof) {
+            _tof = new Adafruit_VL53L0X();
+            if (!_tof->begin()) {
+                delete _tof;
+                _tof = nullptr;
+                return -1;
+            }
+        }
+        VL53L0X_RangingMeasurementData_t measure;
+        _tof->rangingTest(&measure, false);
+        if (measure.RangeStatus != 4) {
+            return (int)measure.RangeMilliMeter;
+        }
+        return -1;
+        #else
+        return -1;
+        #endif
+    }
+
+    /**
+     * Read MQ-Series Gas Sensor concentration in PPM (MQ-2, MQ-4, MQ-7, MQ-135)
+     * Defaults to MQ-135 CO2-equivalent curve (a=116.6, b=-2.769)
+     */
+    float readGasPPM(uint8_t pin, float r0 = 10.0f, float rl = 10.0f, float a = 116.602f, float b = -2.769f) {
+        float v = readPinVoltage(pin, 5);
+        float vRef = getAdcRefVoltage();
+        if (v <= 0.01f || v >= vRef || r0 <= 0.0f || rl <= 0.0f) return 0.0f;
+        float rs = rl * ((vRef - v) / v);
+        float ratio = rs / r0;
+        if (ratio <= 0.0f) return 0.0f;
+        return a * powf(ratio, b);
+    }
+
+    /**
+     * Read Sharp GP2Y1010AU0F Optical Dust / PM2.5 Sensor (returns µg/m³)
+     */
+    float readDustDensity(uint8_t ledPin, uint8_t analogPin) {
+        pinMode(ledPin, OUTPUT);
+        digitalWrite(ledPin, LOW); // Activate IR LED (active-low on most GP2Y1010 breakout boards)
+        delayMicroseconds(280);
+        int raw = analogRead(analogPin);
+        delayMicroseconds(40);
+        digitalWrite(ledPin, HIGH);
+        delayMicroseconds(9680);
+
+        float v = ((float)raw * getAdcRefVoltage()) / (float)getAdcMax();
+        float densityMgM3 = 0.17f * v - 0.1f;
+        if (densityMgM3 < 0.0f) densityMgM3 = 0.0f;
+        return densityMgM3 * 1000.0f; // µg/m³
+    }
+
+    /**
+     * Read MH-Z19B / PWM NDIR CO2 Sensor (returns PPM, typically 400 to 5000, or -1 on timeout)
+     */
+    int readCO2PWM(uint8_t pwmPin, int rangePPM = 5000) {
+        pinMode(pwmPin, INPUT);
+        unsigned long thUs = pulseIn(pwmPin, HIGH, 2500000UL);
+        if (thUs == 0) return -1;
+        if (thUs <= 2000UL) return 0;
+        if (thUs >= 1002000UL) return rangePPM;
+        long ppm = (long)(((uint64_t)rangePPM * (thUs - 2000UL)) / 1000000UL);
+        return (int)constrain(ppm, 0L, (long)rangePPM);
+    }
+
+    /**
+     * Read TDS (Total Dissolved Solids / Water Quality) Sensor in PPM with temperature compensation
+     */
+    float readTDS(uint8_t pin, float waterTempC = 25.0f) {
+        float v = readPinVoltage(pin, 10);
+        float compCoeff = 1.0f + 0.02f * (waterTempC - 25.0f);
+        if (compCoeff <= 0.0f) compCoeff = 1.0f;
+        float compV = v / compCoeff;
+        float tds = (133.42f * compV * compV * compV
+                     - 255.86f * compV * compV
+                     + 857.39f * compV) * 0.5f;
+        return (tds < 0.0f) ? 0.0f : tds;
+    }
+
+    /**
+     * Read Analog pH Sensor Probe (0.0 to 14.0 pH)
+     */
+    float readPH(uint8_t pin, float neutralVoltage = 2.50f, float slope = -5.70f) {
+        float v = readPinVoltage(pin, 10);
+        float ph = 7.0f + ((v - neutralVoltage) * slope);
+        return constrain(ph, 0.0f, 14.0f);
+    }
+
+    /**
+     * Read Water Turbidity Sensor in NTU (Nephelometric Turbidity Units, 0 to 3000)
+     */
+    float readTurbidityNTU(uint8_t pin) {
+        float v = readPinVoltage(pin, 10);
+        // Scale to 5V curve if running on 3.3V ADC with voltage divider
+        if (v < 2.5f) return 3000.0f;
+        if (v > 4.2f) return 0.0f;
+        float ntu = -1120.4f * v * v + 5742.3f * v - 4352.9f;
+        return constrain(ntu, 0.0f, 3000.0f);
+    }
+
+    /**
+     * Read Water Flow Sensor (YF-S201 / Hall-effect turbine) in Liters Per Minute (L/min)
+     * @param pin                Digital pulse pin
+     * @param calibrationFactor  Pulses per second per L/min (7.5 for YF-S201 1/2" sensor)
+     */
+    float readWaterFlowLPM(uint8_t pin, float calibrationFactor = 7.5f) {
+        if (calibrationFactor <= 0.0f) return 0.0f;
+        pinMode(pin, INPUT_PULLUP);
+        unsigned long highUs = pulseIn(pin, HIGH, 250000UL);
+        unsigned long lowUs  = pulseIn(pin, LOW, 250000UL);
+        unsigned long periodUs = highUs + lowUs;
+        if (periodUs == 0) return 0.0f;
+        float freqHz = 1000000.0f / (float)periodUs;
+        return freqHz / calibrationFactor;
+    }
+
+    /**
+     * Read HX711 24-Bit Load Cell Amplifier (Raw 24-bit signed value)
+     * Uses native bit-banged protocol — zero external libraries required!
+     */
+    long readWeightRaw(uint8_t doutPin, uint8_t sckPin, uint32_t timeoutMs = 200) {
+        pinMode(sckPin, OUTPUT);
+        pinMode(doutPin, INPUT);
+        digitalWrite(sckPin, LOW);
+
+        unsigned long start = millis();
+        while (digitalRead(doutPin) == HIGH) {
+            if (millis() - start > timeoutMs) return 0;
+        }
+
+        uint32_t value = 0;
+        for (uint8_t i = 0; i < 24; i++) {
+            digitalWrite(sckPin, HIGH);
+            delayMicroseconds(1);
+            value = (value << 1) | (digitalRead(doutPin) ? 1UL : 0UL);
+            digitalWrite(sckPin, LOW);
+            delayMicroseconds(1);
+        }
+
+        // 25th pulse sets Channel A, Gain 128 for next conversion
+        digitalWrite(sckPin, HIGH);
+        delayMicroseconds(1);
+        digitalWrite(sckPin, LOW);
+
+        if (value & 0x800000UL) {
+            value |= 0xFF000000UL; // Sign-extend 24-bit two's complement to 32-bit
+        }
+        return (long)((int32_t)value);
+    }
+
+    /**
+     * Read Calibrated Weight in Grams from HX711 Load Cell
+     */
+    float readWeightGrams(uint8_t doutPin, uint8_t sckPin, long tareOffset = 0, float scaleFactor = 420.0f) {
+        if (scaleFactor == 0.0f) return 0.0f;
+        long raw = readWeightRaw(doutPin, sckPin);
+        return (float)(raw - tareOffset) / scaleFactor;
+    }
+
+    /**
+     * Read ACS712 Hall-Effect DC Current Sensor in Amps
+     * @param sensitivityMvPerA  185.0 (5A module), 100.0 (20A module), or 66.0 (30A module)
+     */
+    float readCurrentDC(uint8_t pin, float sensitivityMvPerA = 185.0f, float zeroPointV = -1.0f) {
+        if (sensitivityMvPerA <= 0.0f) return 0.0f;
+        if (zeroPointV < 0.0f) zeroPointV = getAdcRefVoltage() * 0.5f;
+        float v = readPinVoltage(pin, 10);
+        return ((v - zeroPointV) * 1000.0f) / sensitivityMvPerA;
+    }
+
+    /**
+     * Read ACS712 Hall-Effect AC RMS Current in Amps (samples peak-to-peak over 20ms 50/60Hz cycle)
+     */
+    float readCurrentAC(uint8_t pin, float sensitivityMvPerA = 185.0f, uint16_t windowMs = 20) {
+        if (sensitivityMvPerA <= 0.0f) return 0.0f;
+        int minVal = getAdcMax();
+        int maxVal = 0;
+        unsigned long start = millis();
+        do {
+            int val = analogRead(pin);
+            if (val > maxVal) maxVal = val;
+            if (val < minVal) minVal = val;
+        } while (millis() - start < windowMs);
+
+        float vpp = ((float)(maxVal - minVal) * getAdcRefVoltage()) / (float)getAdcMax();
+        float vRms = (vpp * 0.5f) * 0.70710678f;
+        return (vRms * 1000.0f) / sensitivityMvPerA;
+    }
+
+    /**
+     * Read DC Voltage Sensor (0-25V resistor divider module, default 5:1 ratio)
+     */
+    float readVoltageDivider(uint8_t pin, float dividerRatio = 5.0f) {
+        return readPinVoltage(pin, 5) * dividerRatio;
+    }
+
+    /**
+     * Read Analog Pulse / Heart-Rate PPG Sensor (normalized 0-100%)
+     */
+    int readHeartPulsePercent(uint8_t pin) {
+        return readAnalogPercent(pin);
     }
 
     /**
@@ -246,6 +686,29 @@ public:
         temp = hum = pres = -1.0f;
     }
 #endif
+
+    /**
+     * Read BMP280 Pressure & Temperature (or BME280 Pressure) in hPa
+     */
+    float readPressure(uint8_t addr = 0x76) {
+        #if INTEGRALL_BME280_AVAILABLE
+        float t, h, p;
+        readEnvironment(addr, t, h, p);
+        if (p > 0.0f) return p;
+        #endif
+        #if INTEGRALL_BMP280_AVAILABLE
+        if (!_bmp || _bmpAddr != addr || !_bmpReady) {
+            if (!_bmp) _bmp = new Adafruit_BMP280();
+            _bmpReady = _bmp->begin(addr);
+            _bmpAddr = addr;
+            if (!_bmpReady) return -1.0f;
+        }
+        return _bmp->readPressure() / 100.0f;
+        #else
+        (void)addr;
+        return -1.0f;
+        #endif
+    }
 
     /**
      * Read temperature from DHT11/DHT22 sensor
@@ -363,6 +826,41 @@ public:
         return "Unknown";
         #endif
     }
+    /**
+     * Get Pitch and Roll angles in degrees (-180 to +180) and die temperature (°C) from MPU6050
+     */
+    float getPitch() {
+        #if INTEGRALL_MPU6050_AVAILABLE
+        if (!_imuStarted) return 0.0f;
+        sensors_event_t a, g, temp;
+        _mpu.getEvent(&a, &g, &temp);
+        return atan2f(-a.acceleration.x, sqrtf(a.acceleration.y * a.acceleration.y + a.acceleration.z * a.acceleration.z)) * 180.0f / PI;
+        #else
+        return 0.0f;
+        #endif
+    }
+
+    float getRoll() {
+        #if INTEGRALL_MPU6050_AVAILABLE
+        if (!_imuStarted) return 0.0f;
+        sensors_event_t a, g, temp;
+        _mpu.getEvent(&a, &g, &temp);
+        return atan2f(a.acceleration.y, a.acceleration.z) * 180.0f / PI;
+        #else
+        return 0.0f;
+        #endif
+    }
+
+    float getIMUTemperature() {
+        #if INTEGRALL_MPU6050_AVAILABLE
+        if (!_imuStarted) return -999.0f;
+        sensors_event_t a, g, temp;
+        _mpu.getEvent(&a, &g, &temp);
+        return temp.temperature;
+        #else
+        return -999.0f;
+        #endif
+    }
 #endif
 
 private:
@@ -393,6 +891,16 @@ private:
     Adafruit_BME280* _bme = nullptr;
     uint8_t _bmeAddr = 0;
     bool _bmeReady = false;
+#endif
+
+#if INTEGRALL_BMP280_AVAILABLE
+    Adafruit_BMP280* _bmp = nullptr;
+    uint8_t _bmpAddr = 0;
+    bool _bmpReady = false;
+#endif
+
+#if INTEGRALL_VL53L0X_AVAILABLE
+    Adafruit_VL53L0X* _tof = nullptr;
 #endif
 
 #if INTEGRALL_MPU6050_AVAILABLE
