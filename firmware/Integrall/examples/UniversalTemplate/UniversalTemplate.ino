@@ -39,9 +39,11 @@ void loop() {
         lastCheck = millis();
         
         // Use integrall to report ANY data to the cloud in one line
-        StaticJsonDocument<128> doc;
+        #if INTEGRALL_NETWORK_AVAILABLE
+        JsonDocument doc;
         doc["my_custom_data"] = analogRead(A0); // Even if it's not an "Integrall" sensor
         integrall.sendTelemetry(doc);
+        #endif
         
         // Use integrall for instant UI feedback
         integrall.lcdPrint("Data Sent!", 0, 1);

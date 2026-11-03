@@ -4,22 +4,23 @@
  * Implementation of device management core
  */
 
-// Force compilation of networking logic in the library object file.
-// The Arduino compilation process builds .cpp files independently of the sketch.
-// By defining this here, we ensure the linker has the network symbols available.
-// If the user's sketch DOES NOT enable WiFi, the linker will simply garbage-collect (--gc-sections)
-// this unused code, resulting in zero overhead.
 #include "DeviceManager.h"
+
+#if INTEGRALL_NETWORK_AVAILABLE
+  #if ARDUINOJSON_VERSION_MAJOR >= 7
+    #define INTEGRALL_JSON_DOC(name, cap) JsonDocument name
+  #else
+    #define INTEGRALL_JSON_DOC(name, cap) StaticJsonDocument<cap> name
+  #endif
+#endif
 
 namespace Integrall {
 
-// Static instance pointer for WiFi event callbacks
-DeviceManager* DeviceManager::_instance = nullptr;
-
 DeviceManager::DeviceManager() 
     : _state(DeviceState::UNINITIALIZED)
+    , _wifi_configured(false)
     , _last_reconnect_attempt(0)
-    , _last_poll_time(0)
+    , _last_register_attempt(0)
     , _registration_retry_count(0) {
     _device_id[0] = '\0';
     _device_ip[0] = '\0';
@@ -28,16 +29,16 @@ DeviceManager::DeviceManager()
 
 bool DeviceManager::begin(const DeviceConfig& config) {
     _config = config;
-    _instance = this;  // Set static pointer for callbacks
     
     Logger::begin();
-   #ifndef INTEGRALL_VERSION_STRING
-  #define INTEGRALL_VERSION_STRING "1.0.0"
-#endif
+    #ifndef INTEGRALL_VERSION_STRING
+      #define INTEGRALL_VERSION_STRING "1.1.0"
+    #endif
 
-#ifndef INTEGRALL_BACKEND_ENABLED
-  #define INTEGRALL_BACKEND_ENABLED 1
-#endif
+    #ifndef INTEGRALL_BACKEND_ENABLED
+      #define INTEGRALL_BACKEND_ENABLED 1
+    #endif
+
     INTEGRALL_LOG_INFO("Integrall System Starting...");
     INTEGRALL_LOG_INFO_VAL("Version: ", INTEGRALL_VERSION_STRING);
     
@@ -46,13 +47,6 @@ bool DeviceManager::begin(const DeviceConfig& config) {
     INTEGRALL_LOG_INFO_VAL("Device ID: ", _device_id);
     
     #if INTEGRALL_NETWORK_AVAILABLE
-        #if defined(ESP32)
-        // Register WiFi event handlers (event-driven, no polling)
-        WiFi.onEvent(_onWiFiConnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_CONNECTED);
-        WiFi.onEvent(_onWiFiDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
-        WiFi.onEvent(_onWiFiConnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
-        #endif
-
         // Attempt WiFi connection if credentials provided
         if (_config.wifi_ssid && strlen(_config.wifi_ssid) > 0) {
             if (_config.use_wifi_manager) {
@@ -60,10 +54,14 @@ bool DeviceManager::begin(const DeviceConfig& config) {
                 return startConfigPortal(_config.wifi_ssid, _config.wifi_password);
             } else {
                 // Standard Station (STA) Mode
+                _wifi_configured = true;
                 _setState(DeviceState::CONNECTING_WIFI);
-                if (!_connectWiFi()) {
+                if (_connectWiFi()) {
+                    _setState(DeviceState::WIFI_CONNECTED);
+                } else {
                     _setState(DeviceState::DISCONNECTED);
-                    _setError("WiFi connection failed");
+                    _setError("WiFi initial connection timed out; will retry in background");
+                    _last_reconnect_attempt = millis();
                     return false;
                 }
             }
@@ -75,16 +73,47 @@ bool DeviceManager::begin(const DeviceConfig& config) {
     return true;
 }
 
+void DeviceManager::_updateIpFromWiFi() {
+    #if INTEGRALL_NETWORK_AVAILABLE
+    String ip = WiFi.localIP().toString();
+    INTEGRALL_SAFE_STRCPY(_device_ip, ip.c_str(), sizeof(_device_ip));
+    #endif
+}
+
 void DeviceManager::handle() {
     #if INTEGRALL_NETWORK_AVAILABLE
+    if (!_wifi_configured && _state != DeviceState::CONFIGURING) {
+        return;
+    }
+
+    if (_state != DeviceState::CONFIGURING) {
+        bool connected = (WiFi.status() == WL_CONNECTED);
+        if (!connected && (_state == DeviceState::WIFI_CONNECTED ||
+                           _state == DeviceState::REGISTERING ||
+                           _state == DeviceState::ONLINE)) {
+            INTEGRALL_LOG_WARN("WiFi connection lost");
+            _setState(DeviceState::DISCONNECTED);
+            _last_reconnect_attempt = millis();
+        } else if (connected && (_state == DeviceState::DISCONNECTED ||
+                                _state == DeviceState::CONNECTING_WIFI)) {
+            _updateIpFromWiFi();
+            INTEGRALL_LOG_INFO_VAL("WiFi reconnected, IP: ", _device_ip);
+            _registration_retry_count = 0;
+            _setState(DeviceState::WIFI_CONNECTED);
+        }
+    }
+
     switch (_state) {
         case DeviceState::DISCONNECTED:
+        case DeviceState::CONNECTING_WIFI:
             _handleWiFiReconnect();
             break;
             
         case DeviceState::WIFI_CONNECTED:
             #if INTEGRALL_BACKEND_ENABLED
-            if (_config.backend_url) {
+            if (_config.backend_url && strlen(_config.backend_url) > 0 &&
+                _config.api_key && strlen(_config.api_key) > 0) {
+                _last_register_attempt = 0;
                 _setState(DeviceState::REGISTERING);
             } else {
                 _setState(DeviceState::ONLINE);
@@ -95,28 +124,23 @@ void DeviceManager::handle() {
             break;
             
         case DeviceState::REGISTERING:
-            if (_registerWithBackend()) {
-                _setState(DeviceState::ONLINE);
-                _registration_retry_count = 0;
-            } else {
-                _registration_retry_count++;
-                if (_registration_retry_count >= INTEGRALL_HTTP_RETRY_ATTEMPTS) {
-                    _setError("Backend registration failed after retries");
-                    _setState(DeviceState::ERROR);
+            if (_last_register_attempt == 0 || (millis() - _last_register_attempt >= 1000)) {
+                _last_register_attempt = millis();
+                if (_registerWithBackend()) {
+                    _setState(DeviceState::ONLINE);
+                    _registration_retry_count = 0;
+                } else {
+                    _registration_retry_count++;
+                    if (_registration_retry_count >= INTEGRALL_HTTP_RETRY_ATTEMPTS) {
+                        _setError("Backend registration failed; continuing online without registration");
+                        INTEGRALL_LOG_WARN("Backend registration failed after retries; proceeding to ONLINE state");
+                        _setState(DeviceState::ONLINE);
+                    }
                 }
-                delay(1000);
             }
             break;
             
         case DeviceState::ONLINE:
-            #if INTEGRALL_BACKEND_ENABLED
-            if (millis() - _last_poll_time >= _config.poll_interval_ms) {
-                _checkBackendCommands();
-                _last_poll_time = millis();
-            }
-            #endif
-            break;
-            
         default:
             break;
     }
@@ -134,6 +158,8 @@ bool DeviceManager::_connectWiFi() {
     WiFi.mode(WIFI_STA);
     #if defined(ESP32)
     WiFi.setHostname(_device_id);
+    #elif defined(ESP8266)
+    WiFi.hostname(_device_id);
     #endif
     
     WiFi.begin(_config.wifi_ssid, _config.wifi_password);
@@ -143,14 +169,17 @@ bool DeviceManager::_connectWiFi() {
     while (WiFi.status() != WL_CONNECTED && 
            (millis() - start < _config.wifi_connect_timeout_ms)) {
         delay(100);
-        Serial.print(".");
+        #if INTEGRALL_DEBUG_LEVEL > 0
+        if (Logger::ready()) Serial.print(".");
+        #endif
     }
-    Serial.println();
+    #if INTEGRALL_DEBUG_LEVEL > 0
+    if (Logger::ready()) Serial.println();
+    #endif
     
     if (WiFi.status() == WL_CONNECTED) {
-        INTEGRALL_LOG_INFO_VAL("WiFi connected, IP: ", WiFi.localIP().toString().c_str());
-        strncpy(_device_ip, WiFi.localIP().toString().c_str(), sizeof(_device_ip) - 1);
-        _device_ip[sizeof(_device_ip) - 1] = '\0';
+        _updateIpFromWiFi();
+        INTEGRALL_LOG_INFO_VAL("WiFi connected, IP: ", _device_ip);
         return true;
     }
     #endif
@@ -163,6 +192,7 @@ void DeviceManager::_handleWiFiReconnect() {
     if (now - _last_reconnect_attempt >= _config.reconnect_interval_ms) {
         _last_reconnect_attempt = now;
         INTEGRALL_LOG_INFO("Attempting WiFi reconnect...");
+        _setState(DeviceState::CONNECTING_WIFI);
         WiFi.reconnect();
     }
     #endif
@@ -170,26 +200,24 @@ void DeviceManager::_handleWiFiReconnect() {
 
 bool DeviceManager::_registerWithBackend() {
     #if INTEGRALL_NETWORK_AVAILABLE && INTEGRALL_BACKEND_ENABLED
-    if (!_config.backend_url || !_config.api_key) {
+    if (!_config.backend_url || strlen(_config.backend_url) == 0 ||
+        !_config.api_key || strlen(_config.api_key) == 0) {
         return false;
     }
     
-    char url[128];
+    char url[192];
     snprintf(url, sizeof(url), "%s/api/devices/register", _config.backend_url);
     
-    StaticJsonDocument<512> doc;
+    INTEGRALL_JSON_DOC(doc, 512);
     doc["device_id"] = _device_id;
     doc["ip_address"] = _device_ip;
-    
-    #if INTEGRALL_NETWORK_AVAILABLE
     doc["mac_address"] = WiFi.macAddress();
     doc["rssi"] = WiFi.RSSI();
     doc["sdk_version"] = ESP.getSdkVersion();
-    #endif
     doc["firmware_version"] = INTEGRALL_VERSION_STRING;
     
     char payload[512];
-    serializeJson(doc, payload);
+    serializeJson(doc, payload, sizeof(payload));
     
     #if defined(ESP32)
     _http.begin(url);
@@ -204,34 +232,8 @@ bool DeviceManager::_registerWithBackend() {
     bool success = (httpCode == 200 || httpCode == 201);
     _http.end();
     return success;
-    #endif
-    return false;
-}
-
-void DeviceManager::_checkBackendCommands() {
-    #if INTEGRALL_NETWORK_AVAILABLE && INTEGRALL_BACKEND_ENABLED
-    if (!_config.backend_url || !_config.api_key) return;
-    
-    char url[128];
-    snprintf(url, sizeof(url), "%s/api/devices/%s/commands", _config.backend_url, _device_id);
-    
-    #if defined(ESP32)
-    _http.begin(url);
     #else
-    _http.begin(_wifiClient, url);
-    #endif
-
-    _http.addHeader("X-API-Key", _config.api_key);
-    
-    int httpCode = _http.GET();
-    if (httpCode == 200) {
-        String response = _http.getString();
-        StaticJsonDocument<512> doc;
-        if (!deserializeJson(doc, response)) {
-            // Processing logic would go here
-        }
-    }
-    _http.end();
+    return false;
     #endif
 }
 
@@ -251,38 +253,26 @@ void DeviceManager::_setState(DeviceState new_state) {
 }
 
 void DeviceManager::_setError(const char* error) {
-    INTEGRALL_SAFE_STRCPY(_last_error, error, sizeof(_last_error));
-}
-
-#if defined(ESP32) && INTEGRALL_NETWORK_AVAILABLE
-void DeviceManager::_onWiFiConnected(WiFiEvent_t event, WiFiEventInfo_t info) {
-    if (_instance && event == WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP) {
-        strncpy(_instance->_device_ip, WiFi.localIP().toString().c_str(), sizeof(_instance->_device_ip) - 1);
-        _instance->_setState(DeviceState::WIFI_CONNECTED);
+    if (error) {
+        INTEGRALL_SAFE_STRCPY(_last_error, error, sizeof(_last_error));
     }
 }
-void DeviceManager::_onWiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
-    if (_instance) _instance->_setState(DeviceState::DISCONNECTED);
-}
-#endif
 
 #if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::sendTelemetry(const JsonDocument& data) {
     #if INTEGRALL_BACKEND_ENABLED
-    // Allow sending data if we have WiFi, even if registration isn't complete yet
-    // (Crucial for simple Flask/Community backends that only want JSON posts)
-    if (_state != DeviceState::ONLINE && _state != DeviceState::WIFI_CONNECTED) {
+    if (!isWiFiConnected() || !_config.backend_url || strlen(_config.backend_url) == 0) {
         return false;
     }
     
-    char url[128];
+    char url[192];
     snprintf(url, sizeof(url), "%s/api/telemetry", _config.backend_url);
     
-    StaticJsonDocument<1024> doc;
+    INTEGRALL_JSON_DOC(doc, 1024);
     doc["device_id"] = _device_id;
     doc["data"] = data;
     
-    char payload[1024];
+    String payload;
     serializeJson(doc, payload);
     
     #if defined(ESP32)
@@ -292,25 +282,29 @@ bool DeviceManager::sendTelemetry(const JsonDocument& data) {
     #endif
 
     _http.addHeader("Content-Type", "application/json");
-    _http.addHeader("X-API-Key", _config.api_key);
+    if (_config.api_key && strlen(_config.api_key) > 0) {
+        _http.addHeader("X-API-Key", _config.api_key);
+    }
     
     int httpCode = _http.POST(payload);
     _http.end();
-    return (httpCode == 200 || httpCode == 201);
-    #endif
+    return (httpCode >= 200 && httpCode < 300);
+    #else
+    (void)data;
     return false;
+    #endif
 }
-#endif
 
-#if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::sendCommandResponse(const char* command_id, bool success, const char* message) {
     #if INTEGRALL_BACKEND_ENABLED
-    if (_state != DeviceState::ONLINE) return false;
+    if (!isWiFiConnected() || !_config.backend_url || strlen(_config.backend_url) == 0 || !command_id) {
+        return false;
+    }
     
-    char url[128];
+    char url[192];
     snprintf(url, sizeof(url), "%s/api/commands/%s/response", _config.backend_url, command_id);
     
-    StaticJsonDocument<256> doc;
+    INTEGRALL_JSON_DOC(doc, 256);
     doc["success"] = success;
     if (message) doc["message"] = message;
     
@@ -321,39 +315,56 @@ bool DeviceManager::sendCommandResponse(const char* command_id, bool success, co
     #endif
     
     _http.addHeader("Content-Type", "application/json");
-    _http.addHeader("X-API-Key", _config.api_key);
+    if (_config.api_key && strlen(_config.api_key) > 0) {
+        _http.addHeader("X-API-Key", _config.api_key);
+    }
     
     String payload;
     serializeJson(doc, payload);
     int httpCode = _http.POST(payload);
     _http.end();
-    return (httpCode == 200 || httpCode == 201);
-    #endif
+    return (httpCode >= 200 && httpCode < 300);
+    #else
+    (void)command_id;
+    (void)success;
+    (void)message;
     return false;
+    #endif
 }
-#endif
 
-#if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::startConfigPortal(const char* ap_name, const char* ap_password) {
     _setState(DeviceState::CONFIGURING);
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(ap_name, ap_password);
-    return true;
+    bool ok = WiFi.softAP(ap_name ? ap_name : "Integrall-Setup", ap_password);
+    if (ok) {
+        String ip = WiFi.softAPIP().toString();
+        INTEGRALL_SAFE_STRCPY(_device_ip, ip.c_str(), sizeof(_device_ip));
+    }
+    return ok;
 }
-#endif
 
-#if INTEGRALL_NETWORK_AVAILABLE
 bool DeviceManager::stopConfigPortal() {
     WiFi.softAPdisconnect(true);
     _setState(DeviceState::DISCONNECTED);
     return true;
 }
+#else
+bool DeviceManager::startConfigPortal(const char* ap_name, const char* ap_password) {
+    (void)ap_name;
+    (void)ap_password;
+    return false;
+}
+
+bool DeviceManager::stopConfigPortal() {
+    return false;
+}
 #endif
 
 void DeviceManager::reconnect() {
     #if INTEGRALL_NETWORK_AVAILABLE
-    if (_state == DeviceState::DISCONNECTED || _state == DeviceState::ERROR) {
+    if (_wifi_configured) {
         _setState(DeviceState::CONNECTING_WIFI);
+        _last_reconnect_attempt = millis();
         WiFi.reconnect();
     }
     #endif
@@ -361,6 +372,7 @@ void DeviceManager::reconnect() {
 
 #if INTEGRALL_NETWORK_AVAILABLE
 String DeviceManager::httpGet(const char* url) {
+    if (!url || !isWiFiConnected()) return "";
     #if defined(ESP32)
     _http.begin(url);
     #else
@@ -375,14 +387,15 @@ String DeviceManager::httpGet(const char* url) {
 }
 
 int DeviceManager::httpPost(const char* url, const char* payload, const char* contentType) {
+    if (!url || !payload || !isWiFiConnected()) return -1;
     #if defined(ESP32)
     _http.begin(url);
     #else
     _http.begin(_wifiClient, url);
     #endif
     
-    _http.addHeader("Content-Type", contentType);
-    int code = _http.POST(payload);
+    _http.addHeader("Content-Type", contentType ? contentType : "application/json");
+    int code = _http.POST((uint8_t*)payload, strlen(payload));
     _last_response = "";
     if (code > 0) _last_response = _http.getString();
     _http.end();
@@ -390,17 +403,12 @@ int DeviceManager::httpPost(const char* url, const char* payload, const char* co
 }
 
 int DeviceManager::httpPostFile(const char* url, uint8_t* data, size_t len, const char* fileName, const char* fileKey, const char* extraKey, const char* extraVal) {
-    #if defined(ESP32)
-    _http.begin(url);
-    #else
-    _http.begin(_wifiClient, url);
-    #endif
+    if (!url || !data || len == 0 || !isWiFiConnected()) return -1;
 
     String boundary = "----IntegrallBoundary" + String(millis());
-    _http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
     
     String head = "--" + boundary + "\r\n";
-    head += "Content-Disposition: form-data; name=\"" + String(fileKey) + "\"; filename=\"" + String(fileName) + "\"\r\n";
+    head += "Content-Disposition: form-data; name=\"" + String(fileKey ? fileKey : "file") + "\"; filename=\"" + String(fileName ? fileName : "upload.bin") + "\"\r\n";
     head += "Content-Type: application/octet-stream\r\n\r\n";
     
     String tail = "\r\n--" + boundary;
@@ -410,21 +418,32 @@ int DeviceManager::httpPostFile(const char* url, uint8_t* data, size_t len, cons
     tail += "--\r\n";
     
     size_t totalLen = head.length() + len + tail.length();
-    _http.addHeader("Content-Length", String(totalLen));
-    
-    int code = _http.sendRequest("POST", (uint8_t*)head.c_str(), head.length());
-    if (code > 0) {
-        uint8_t* buffer = (uint8_t*)malloc(totalLen);
-        if (buffer) {
-            memcpy(buffer, head.c_str(), head.length());
-            memcpy(buffer + head.length(), data, len);
-            memcpy(buffer + head.length() + len, tail.c_str(), tail.length());
-            code = _http.POST(buffer, totalLen);
-            free(buffer);
-        } else {
-            code = -2; // Out of memory
-        }
+    uint8_t* buffer = nullptr;
+    #if defined(ESP32)
+    if (psramFound()) {
+        buffer = (uint8_t*)ps_malloc(totalLen);
     }
+    #endif
+    if (!buffer) {
+        buffer = (uint8_t*)malloc(totalLen);
+    }
+    if (!buffer) {
+        return -2; // Out of memory
+    }
+
+    memcpy(buffer, head.c_str(), head.length());
+    memcpy(buffer + head.length(), data, len);
+    memcpy(buffer + head.length() + len, tail.c_str(), tail.length());
+
+    #if defined(ESP32)
+    _http.begin(url);
+    #else
+    _http.begin(_wifiClient, url);
+    #endif
+
+    _http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
+    int code = _http.POST(buffer, totalLen);
+    free(buffer);
     
     _last_response = "";
     if (code > 0) _last_response = _http.getString();
@@ -433,6 +452,7 @@ int DeviceManager::httpPostFile(const char* url, uint8_t* data, size_t len, cons
 }
 
 Stream* DeviceManager::getStream(const char* url) {
+    if (!url || !isWiFiConnected()) return nullptr;
     #if defined(ESP32)
     _http.begin(url);
     #else
@@ -447,6 +467,7 @@ Stream* DeviceManager::getStream(const char* url) {
         return &_wifiClient;
         #endif
     }
+    _http.end();
     return nullptr;
 }
 

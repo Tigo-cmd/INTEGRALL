@@ -30,7 +30,7 @@ void loop() {
 
         // JSON and Telemetry are only available on IoT boards (ESP32/ESP8266)
         #if defined(ESP32) || defined(ESP8266)
-        StaticJsonDocument<256> doc;
+        JsonDocument doc;
         doc["uptime"] = millis() / 1000;
         doc["ip"] = integrall.getIPAddress();
         doc["status"] = integrall.getStatusString();

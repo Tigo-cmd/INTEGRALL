@@ -19,7 +19,8 @@ namespace Integrall {
 class RGBModule {
 public:
     RGBModule() : _rPin(255), _gPin(255), _bPin(255),
-                  _commonAnode(false), _initialized(false) {}
+                  _commonAnode(false), _initialized(false),
+                  _lastBlink(0), _blinkState(false) {}
 
     /**
      * Initialize RGB LED
@@ -34,8 +35,8 @@ public:
         pinMode(_rPin, OUTPUT);
         pinMode(_gPin, OUTPUT);
         pinMode(_bPin, OUTPUT);
-        off();
         _initialized = true;
+        off();
         return true;
     }
 
@@ -53,6 +54,7 @@ public:
      * Set color by name
      */
     void setColor(const char* colorName) {
+        if (!colorName) { off(); return; }
         if      (strcmp(colorName, "red")    == 0)    set(255, 0,   0);
         else if (strcmp(colorName, "green")  == 0)    set(0,   255, 0);
         else if (strcmp(colorName, "blue")   == 0)    set(0,   0,   255);
@@ -61,7 +63,7 @@ public:
         else if (strcmp(colorName, "white")  == 0)    set(255, 255, 255);
         else if (strcmp(colorName, "orange") == 0)    set(255, 100, 0);
         else if (strcmp(colorName, "purple") == 0)    set(150, 0,   255);
-        else                                           off();
+        else                                          off();
     }
 
     /**
@@ -79,12 +81,11 @@ public:
      * Non-blocking blink (call in loop)
      */
     void updateBlink(uint8_t r, uint8_t g, uint8_t b, uint32_t intervalMs = 500) {
-        static unsigned long last = 0;
-        static bool state = false;
-        if (millis() - last > intervalMs) {
-            state = !state;
-            if (state) set(r, g, b); else off();
-            last = millis();
+        unsigned long now = millis();
+        if (now - _lastBlink >= intervalMs) {
+            _blinkState = !_blinkState;
+            if (_blinkState) set(r, g, b); else off();
+            _lastBlink = now;
         }
     }
 
@@ -92,6 +93,8 @@ private:
     uint8_t _rPin, _gPin, _bPin;
     bool    _commonAnode;
     bool    _initialized;
+    unsigned long _lastBlink;
+    bool    _blinkState;
 };
 
 } // namespace Integrall

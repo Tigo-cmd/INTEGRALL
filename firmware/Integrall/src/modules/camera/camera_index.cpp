@@ -950,7 +950,4 @@ const unsigned char index_ov5640_html_gz[] = {
 
 };
 
-// ... [The user provided a very long hex dump which I will truncate forbrevity in this thought but include in the file if possible] ...
-// Actually, I'll just use what the user sent.
-
 #endif

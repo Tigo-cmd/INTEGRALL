@@ -20,6 +20,7 @@ void setup() {
 
     // 2. One-line Camera Setup (Hides 50 lines of pin config)
     if (integrall.enableCamera()) {
+        integrall.startCameraServer();
         Serial.println(">> Integrall: Camera Ready!");
         Serial.print(">> Stream URL: ");
         Serial.println(integrall.getCameraStreamURL());

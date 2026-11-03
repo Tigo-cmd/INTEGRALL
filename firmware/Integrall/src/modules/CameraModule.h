@@ -26,7 +26,7 @@ public:
     bool begin() {
         if (_initialized) return true;
 
-        camera_config_t config;
+        camera_config_t config = {};
         config.ledc_channel = LEDC_CHANNEL_0;
         config.ledc_timer = LEDC_TIMER_0;
         config.pin_d0 = Y2_GPIO_NUM;
@@ -46,7 +46,7 @@ public:
         config.pin_pwdn = PWDN_GPIO_NUM;
         config.pin_reset = RESET_GPIO_NUM;
         config.xclk_freq_hz = 20000000;
-        config.frame_size = FRAMESIZE_VGA; // Use VGA (640x480) for better speed/lag balance
+        config.frame_size = FRAMESIZE_QVGA; // Use QVGA (320x240) to save DRAM for WiFi/HTTP POST
         config.pixel_format = PIXFORMAT_JPEG; // for streaming
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
         config.fb_location = CAMERA_FB_IN_PSRAM;
@@ -61,7 +61,7 @@ public:
                 config.grab_mode = CAMERA_GRAB_LATEST;
             } else {
                 // Limit the frame size when PSRAM is not available
-                config.frame_size = FRAMESIZE_VGA;
+                config.frame_size = FRAMESIZE_QVGA; // Safety for non-PSRAM DRAM allocation
                 config.fb_location = CAMERA_FB_IN_DRAM;
             }
         }
@@ -77,14 +77,14 @@ public:
         INTEGRALL_LOG_INFO("Camera: Hardware Ready");
         _initialized = true;
         
-        // Auto-start web server if networking is up
-        if (WiFi.status() == WL_CONNECTED) {
-            INTEGRALL_LOG_INFO("Camera: Starting MJPEG server...");
-            startServer();
-            Serial.print(">> [CAM LINK] http://");
-            Serial.print(WiFi.localIP().toString().c_str());
-            Serial.println(":81/stream");
-        }
+        // Fix: Do NOT auto-start MJPEG server to save massive amounts of RAM
+        // if (WiFi.status() == WL_CONNECTED) {
+        //     INTEGRALL_LOG_INFO("Camera: Starting MJPEG server...");
+        //     startServer();
+        //     Serial.print(">> [CAM LINK] http://");
+        //     Serial.print(WiFi.localIP().toString().c_str());
+        //     Serial.println(":81/stream");
+        // }
         
         return true;
     }

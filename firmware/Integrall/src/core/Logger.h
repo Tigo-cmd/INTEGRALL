@@ -31,6 +31,8 @@ public:
             delay(100);
             _started = true;
         }
+        #else
+        (void)baud;
         #endif
     }
 
@@ -51,6 +53,9 @@ public:
             Serial.print(prefix);
             Serial.println(message);
         }
+        #else
+        (void)prefix;
+        (void)message;
         #endif
     }
 
@@ -58,6 +63,8 @@ public:
     static void println(const __FlashStringHelper* msg) {
         #if INTEGRALL_DEBUG_LEVEL > 0
         if (Serial) Serial.println(msg);
+        #else
+        (void)msg;
         #endif
     }
 
@@ -65,6 +72,8 @@ public:
     static void print(const __FlashStringHelper* msg) {
         #if INTEGRALL_DEBUG_LEVEL > 0
         if (Serial) Serial.print(msg);
+        #else
+        (void)msg;
         #endif
     }
 

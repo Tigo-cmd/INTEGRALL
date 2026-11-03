@@ -1,11 +1,11 @@
 {
   "name": "Integrall",
-  "version": "0.1.0",
-  "description": "Unified IoT firmware framework for ESP32 - simplifies hardware integration and backend communication",
-  "keywords": "iot, esp32, framework, relay, keypad, oled, automation",
+  "version": "1.1.0",
+  "description": "Unified IoT firmware framework for ESP32, ESP8266, and Arduino - simplifies hardware integration and backend communication",
+  "keywords": "iot, esp32, esp8266, arduino, framework, relay, keypad, oled, lcd, sensors, servo, camera, automation",
   "repository": {
     "type": "git",
-    "url": "https://github.com/emmanueltigo/integrall.git"
+    "url": "https://github.com/Tigo-cmd/INTEGRALL.git"
   },
   "authors": [
     {
@@ -17,10 +17,10 @@
   "license": "MIT",
   "homepage": "https://integrall.io",
   "dependencies": {
-    "bblanchon/ArduinoJson": "^6.21.3"
+    "bblanchon/ArduinoJson": "^7.0.0"
   },
   "frameworks": "arduino",
-  "platforms": "espressif32",
+  "platforms": ["espressif32", "espressif8266", "atmelavr"],
   "examples": [
     {
       "name": "Basic Relay Control",

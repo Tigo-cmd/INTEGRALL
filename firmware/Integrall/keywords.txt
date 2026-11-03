@@ -57,13 +57,11 @@ easeServo	KEYWORD2
 enableServo	KEYWORD2
 enableKeypad	KEYWORD2
 keypadGetKey	KEYWORD2
+keypadLastKey	KEYWORD2
 keypadCapture	KEYWORD2
 keypadSubmitted	KEYWORD2
 keypadCheckPin	KEYWORD2
 keypadClear	KEYWORD2
-keypadClearBuffer	KEYWORD2
-keypadCaptureString	KEYWORD2
-keypadIsSubmitted	KEYWORD2
 oledPrint	KEYWORD2
 oledPrintValue	KEYWORD2
 oledBar	KEYWORD2

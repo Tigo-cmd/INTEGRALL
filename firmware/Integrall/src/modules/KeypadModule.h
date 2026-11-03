@@ -42,9 +42,19 @@ public:
     KeypadModule() 
         : _keypad(nullptr)
         , _bufferIndex(0)
-        , _last_key(NO_KEY) {
+        , _last_key(NO_KEY)
+        , _just_pressed(NO_KEY)
+        , _submitted(false) {
         memset(_buffer, 0, sizeof(_buffer));
-        memset(_pin_buffer, 0, sizeof(_pin_buffer));
+        memset(_row_pins, 0, sizeof(_row_pins));
+        memset(_col_pins, 0, sizeof(_col_pins));
+    }
+
+    ~KeypadModule() {
+        if (_keypad) {
+            delete _keypad;
+            _keypad = nullptr;
+        }
     }
 
     /**
@@ -55,28 +65,39 @@ public:
      * @param cols Number of columns (default 4)
      */
     bool begin(byte* rowPins, byte* colPins, byte rows = 4, byte cols = 4) {
-        if (rows == 4 && cols == 4) {
-            _keypad = new Keypad(makeKeymap(_DEFAULT_4x4_KEYMAP), rowPins, colPins, rows, cols);
-        } else if (rows == 4 && cols == 3) {
-            _keypad = new Keypad(makeKeymap(_DEFAULT_4x3_KEYMAP), rowPins, colPins, rows, cols);
-        } else {
+        if (!rowPins || !colPins || rows != 4 || (cols != 4 && cols != 3)) {
             return false;
         }
+        if (_keypad) {
+            delete _keypad;
+            _keypad = nullptr;
+        }
+        memcpy(_row_pins, rowPins, rows);
+        memcpy(_col_pins, colPins, cols);
+
+        if (cols == 4) {
+            _keypad = new Keypad(makeKeymap(_DEFAULT_4x4_KEYMAP), _row_pins, _col_pins, rows, cols);
+        } else {
+            _keypad = new Keypad(makeKeymap(_DEFAULT_4x3_KEYMAP), _row_pins, _col_pins, rows, cols);
+        }
         _keypad->setDebounceTime(50);  // 50ms debounce built-in
+        clearBuffer();
         return true;
     }
 
     /**
-     * Get the currently pressed key
-     * Returns '\0' (NO_KEY) if no key is pressed
+     * Get the currently pressed key.
+     * If captureString() was called earlier in the same loop iteration,
+     * returns the key captured during that call once.
+     * Returns '\0' (NO_KEY) if no key is pressed.
      */
     char getKey() {
-        if (!_keypad) return '\0';
-        char key = _keypad->getKey();
-        if (key != NO_KEY) {
-            _last_key = key;
+        if (_just_pressed != NO_KEY) {
+            char k = _just_pressed;
+            _just_pressed = NO_KEY;
+            return k;
         }
-        return key;
+        return _readHardwareKey();
     }
 
     /**
@@ -85,32 +106,55 @@ public:
     char getLastKey() const { return _last_key; }
 
     /**
-     * Buffer mode: Append pressed keys automatally
-     * Returns the current buffered string
+     * Buffer mode: Append pressed keys automatically.
+     * '#' marks the buffer as submitted, '*' acts as Backspace.
+     * Returns the current buffered string.
      */
     const char* captureString(uint8_t maxLen = 8) {
-        char key = getKey();
-        if (key != '\0') {
+        char key = _readHardwareKey();
+        _just_pressed = key;
+        if (key != NO_KEY) {
             if (key == '#') {  // '#' acts as Enter/Submit
-                // Buffer is ready - do nothing, let user read _buffer
+                if (_bufferIndex > 0) {
+                    _submitted = true;
+                }
             } else if (key == '*') {  // '*' acts as Backspace 
+                _submitted = false;
                 if (_bufferIndex > 0) {
                     _buffer[--_bufferIndex] = '\0';
                 }
-            } else if (_bufferIndex < min(maxLen, (uint8_t)(sizeof(_buffer) - 1))) {
-                _buffer[_bufferIndex++] = key;
-                _buffer[_bufferIndex] = '\0';
+            } else {
+                _submitted = false;
+                uint8_t limit = (maxLen < (sizeof(_buffer) - 1)) ? maxLen : (sizeof(_buffer) - 1);
+                if (_bufferIndex < limit) {
+                    _buffer[_bufferIndex++] = key;
+                    _buffer[_bufferIndex] = '\0';
+                }
             }
         }
         return _buffer;
     }
 
     /**
-     * Check if user pressed '#' to submit the buffer
+     * Check if user pressed '#' to submit a non-empty buffer
      */
     bool isSubmitted() {
-        char key = getKey();
-        return (key == '#') && (_bufferIndex > 0);
+        if (_submitted) {
+            _submitted = false;
+            if (_just_pressed == '#') {
+                _just_pressed = NO_KEY;
+            }
+            return true;
+        }
+        char key = _readHardwareKey();
+        if (key != NO_KEY) {
+            _just_pressed = key;
+            if (key == '#' && _bufferIndex > 0) {
+                _just_pressed = NO_KEY;
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -119,21 +163,36 @@ public:
     void clearBuffer() {
         memset(_buffer, 0, sizeof(_buffer));
         _bufferIndex = 0;
+        _submitted = false;
+        _just_pressed = NO_KEY;
     }
 
     /**
      * Compare the buffered string to a password/PIN
      */
-    bool checkPin(const char* correctPin) {
+    bool checkPin(const char* correctPin) const {
+        if (!correctPin) return false;
         return (strcmp(_buffer, correctPin) == 0);
     }
 
 private:
+    char _readHardwareKey() {
+        if (!_keypad) return NO_KEY;
+        char key = _keypad->getKey();
+        if (key != NO_KEY) {
+            _last_key = key;
+        }
+        return key;
+    }
+
     Keypad* _keypad;
+    byte _row_pins[4];
+    byte _col_pins[4];
     char _buffer[17];     // Capture buffer (max 16 chars + null)
-    char _pin_buffer[17]; // Separate secure buffer for PIN comparison
     uint8_t _bufferIndex;
     char _last_key;
+    char _just_pressed;
+    bool _submitted;
 };
 
 } // namespace Integrall

@@ -51,7 +51,7 @@ public:
                 _servo[i].attach(pin);
                 _attached[i] = true;
                 if (startAngle >= 0) {
-                    set(i, startAngle);
+                    set(i, (uint8_t)constrain(startAngle, 0, 180));
                 }
                 return i;
             }
@@ -76,8 +76,12 @@ public:
     void setFromAnalog(int index, uint8_t pin) {
         if (index < 0 || index >= INTEGRALL_MAX_SERVOS || !_attached[index]) return;
         int val = analogRead(pin);
+        #if defined(ESP32)
+        int angle = map(val, 0, 4095, 0, 180);
+        #else
         int angle = map(val, 0, 1023, 0, 180);
-        set(index, angle);
+        #endif
+        set(index, (uint8_t)constrain(angle, 0, 180));
     }
 
     /**
@@ -104,13 +108,15 @@ public:
      * Background handler for animations
      */
     void handle() {
+        unsigned long now = millis();
         for (int i = 0; i < INTEGRALL_MAX_SERVOS; i++) {
             if (!_attached[i] || _mode[i] == 0) continue;
 
-            if (millis() - _last_move[i] > _speed_ms[i]) {
+            if (now - _last_move[i] >= _speed_ms[i]) {
                 if (_mode[i] == 1) { // Sweep
-                    _current_angle[i] += _sweep_dir[i];
-                    if (_current_angle[i] >= 180 || _current_angle[i] <= 0) _sweep_dir[i] *= -1;
+                    if (_current_angle[i] >= 180) _sweep_dir[i] = -1;
+                    else if (_current_angle[i] <= 0) _sweep_dir[i] = 1;
+                    _current_angle[i] = constrain(_current_angle[i] + _sweep_dir[i], 0, 180);
                     _servo[i].write(_current_angle[i]);
                 } 
                 else if (_mode[i] == 2) { // EaseTo
@@ -120,17 +126,13 @@ public:
                     
                     _servo[i].write(_current_angle[i]);
                 }
-                _last_move[i] = millis();
+                _last_move[i] = now;
             }
         }
     }
 
 private:
-#if defined(ESP32)
     Servo _servo[INTEGRALL_MAX_SERVOS];
-#else
-    Servo _servo[INTEGRALL_MAX_SERVOS];
-#endif
     bool _attached[INTEGRALL_MAX_SERVOS];
     int _current_angle[INTEGRALL_MAX_SERVOS];
     int _target_angle[INTEGRALL_MAX_SERVOS];
@@ -144,4 +146,3 @@ private:
 
 #endif // INTEGRALL_MODULE_SERVO_ENABLED
 #endif // INTEGRALL_SERVO_MODULE_H
-

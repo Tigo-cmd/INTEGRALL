@@ -2,7 +2,7 @@
  * TimeModule.h
  * 
  * Centralized time manager for the Integrall Framework. 
- * Combines hardware RTC (Real-Time Clock) and network NTP syncing.
+ * Combines hardware RTC (Real-Time Clock), network NTP syncing, and GPS.
  * Essential for scheduled tasks, logging, and countdown timers.
  */
 
@@ -10,7 +10,10 @@
 #define INTEGRALL_TIME_MODULE_H
 
 #include <Arduino.h>
+#include <time.h>
 #include "../config/IntegrallConfig.h"
+
+#if INTEGRALL_MODULE_TIME_ENABLED
 
 // Optional: include RTC support if user has the library installed
 // Install via Library Manager: "RTClib" by Adafruit
@@ -19,6 +22,14 @@
   #define INTEGRALL_RTC_AVAILABLE 1
 #else
   #define INTEGRALL_RTC_AVAILABLE 0
+#endif
+
+// Optional: include TinyGPS++ support if user has the library installed
+#if __has_include(<TinyGPS++.h>)
+  #include <TinyGPS++.h>
+  #define INTEGRALL_GPS_AVAILABLE 1
+#else
+  #define INTEGRALL_GPS_AVAILABLE 0
 #endif
 
 namespace Integrall {
@@ -71,11 +82,11 @@ public:
     }
 
     /**
-     * Check if system clock is currently synced with network
+     * Non-blocking check if system clock is currently synced with network
      */
     bool isSyncDone() {
-        struct tm timeinfo;
-        return getLocalTime(&timeinfo);
+        time_t now = time(nullptr);
+        return (now > 1577836800); // > 2020-01-01T00:00:00Z
     }
 #endif
 
@@ -83,16 +94,14 @@ public:
      * Read GPS Location (Latitude/Longitude)
      * Requires TinyGPS++ library and a Serial connection to the module.
      */
-#if __has_include(<TinyGPS++.h>)
+#if INTEGRALL_GPS_AVAILABLE
     void getGPSLocation(HardwareSerial& port, float &lat, float &lng) {
-        #include <TinyGPS++.h>
-        static TinyGPSPlus gps;
         while (port.available() > 0) {
-            gps.encode(port.read());
+            _gps.encode(port.read());
         }
-        if (gps.location.isValid()) {
-            lat = gps.location.lat();
-            lng = gps.location.lng();
+        if (_gps.location.isValid()) {
+            lat = _gps.location.lat();
+            lng = _gps.location.lng();
         } else {
             lat = lng = 0.0f;
         }
@@ -103,10 +112,14 @@ private:
 #if INTEGRALL_RTC_AVAILABLE
     RTC_DS3231 _rtc;
 #endif
+#if INTEGRALL_GPS_AVAILABLE
+    TinyGPSPlus _gps;
+#endif
     unsigned long _lastSyncMillis;
     uint32_t _syncInterval;
 };
 
 } // namespace Integrall
 
+#endif // INTEGRALL_MODULE_TIME_ENABLED
 #endif // INTEGRALL_TIME_MODULE_H

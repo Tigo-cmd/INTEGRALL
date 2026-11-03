@@ -10,6 +10,7 @@
 
 #include <Arduino.h>
 #include "../config/IntegrallConfig.h"
+#include "../core/Logger.h"
 
 #if INTEGRALL_MODULE_CELLULAR_ENABLED
 
@@ -17,28 +18,41 @@ namespace Integrall {
 
 class CellularModule {
 public:
-    CellularModule() : _sim800(nullptr), _initialized(false) {}
+    CellularModule() : _sim800(nullptr), _ownsSerial(false), _initialized(false) {}
+
+    ~CellularModule() {
+        if (_ownsSerial && _sim800) {
+            delete _sim800;
+            _sim800 = nullptr;
+        }
+    }
 
     /**
      * Start the SIM800L Cellular Module
-     * @param rxPin  ESP32 RX pin (connects to SIM TX)
-     * @param txPin  ESP32 TX pin (connects to SIM RX)
+     * @param rxPin  MCU RX pin (connects to SIM TX)
+     * @param txPin  MCU TX pin (connects to SIM RX)
      */
     bool begin(uint8_t rxPin = 16, uint8_t txPin = 17) {
         if (_initialized) return true;
 
 #if defined(ESP32)
-        // Use HardwareSerial 2 for ESP32
+        if (_ownsSerial && _sim800) {
+            delete _sim800;
+        }
         _sim800 = new HardwareSerial(2);
+        _ownsSerial = true;
         _sim800->begin(9600, SERIAL_8N1, rxPin, txPin);
 #else
-        return false; // ESP8266 support not fully implemented here yet
+        (void)rxPin;
+        (void)txPin;
+        return false; // HardwareSerial pin remapping requires ESP32
 #endif
 
         if (!_sim800) return false;
 
+        _initialized = true;
+
         INTEGRALL_LOG_INFO("Cellular: Waiting 5s for network stabilization...");
-        // This is a blocking delay on boot exactly as the user specified
         delay(5000); 
 
         INTEGRALL_LOG_INFO("Cellular: Testing GSM module...");
@@ -49,38 +63,45 @@ public:
         
         delay(2000);
         
-        _initialized = true;
         INTEGRALL_LOG_INFO("Cellular: Module Ready");
         return true;
     }
 
     /**
      * Send an AT command and wait for response 
-     * Exact original logic from TestCode1.ino
      */
-    void sendAT(String cmd) {
-        if (!_initialized || !_sim800) return;
+    void sendAT(const char* cmd) {
+        if (!_initialized || !_sim800 || !cmd) return;
         
         _sim800->println(cmd);
         delay(1000);
         
         #if INTEGRALL_DEBUG_LEVEL > 2
-        Serial.print(">> GSM: ");
-        while (_sim800->available()) {
-            Serial.write(_sim800->read());
+        if (Logger::ready()) {
+            Serial.print(F(">> GSM: "));
+            while (_sim800->available()) {
+                Serial.write(_sim800->read());
+            }
+            Serial.println();
+        } else {
+            while (_sim800->available()) {
+                _sim800->read();
+            }
         }
-        Serial.println();
+        #else
+        while (_sim800->available()) {
+            _sim800->read();
+        }
         #endif
     }
 
     /**
      * Send SMS Message
-     * Exact original logic from TestCode1.ino
      * @param number  Target phone number
      * @param message Text payload
      */
     void sendSMS(const char* number, const char* message) {
-        if (!_initialized || !_sim800) return;
+        if (!_initialized || !_sim800 || !number || !message) return;
         
         INTEGRALL_LOG_INFO_VAL("Cellular: Sending SMS to ", number);
 
@@ -99,7 +120,7 @@ public:
 
         _sim800->write(26); // Ctrl+Z to send
 
-        // Big delay waiting for network to process send
+        // Wait for network to process send
         delay(5000); 
         
         INTEGRALL_LOG_INFO("Cellular: SMS Sent");
@@ -107,6 +128,7 @@ public:
 
 private:
     HardwareSerial* _sim800;
+    bool _ownsSerial;
     bool _initialized;
 };
 

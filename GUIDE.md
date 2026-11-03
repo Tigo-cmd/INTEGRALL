@@ -85,7 +85,7 @@ void loop() {
     integrall.sendTelemetry("temperature", 24.5);
     
     // Or send a bundle of data
-    StaticJsonDocument<200> doc;
+    JsonDocument doc;
     doc["temp"] = 25.0;
     doc["hum"] = 60;
     integrall.sendTelemetry(doc);
@@ -123,12 +123,13 @@ Works identically on **ESP32** and **Arduino Uno/Nano** (auto-swaps hardware tim
   - `integrall.sweepServo(speed_ms);` - **Non-blocking** sweep. Put this in your `loop()` and the motor automatically sweeps back and forth.
 
 - **Commands (Multi-Servo)**:
-  If you have more than one motor, `enableServo` returns an ID/index. You can use this ID as the **FIRST parameter** in any servo command to control them independently.
+  If you have more than one motor, `enableServo` returns an ID/index. Pass the ID as the **FIRST parameter** together with the remaining parameters (`setServo(id, angle)`, `sweepServo(id, speed_ms)`, `easeServo(id, angle, speed_ms)`) to control them independently.
   ```cpp
   int arm = integrall.enableServo(10);
   int claw = integrall.enableServo(11);
 
   integrall.setServo(arm, 90);
+  integrall.sweepServo(arm, 15);
   integrall.easeServo(claw, 180, 15);
   ```
 
@@ -165,7 +166,9 @@ Hides row/column scanning and debounce logic completely.
 - **Core Commands**:
   - `integrall.enableKeypad(rowPins, colPins);` - Initialize. Works with 4x4 or 4x3 keypads.
   - `char k = integrall.keypadGetKey();` - Read the currently pressed key (raw).
+  - `char last = integrall.keypadLastKey();` - Read the most recently pressed key.
   - `integrall.keypadCapture(maxLen);` - Build a string from keypresses. `*` = Backspace, `#` = Enter.
+  - `integrall.keypadSubmitted();` - Returns `true` when `#` is pressed with a non-empty buffer.
   - `integrall.keypadCheckPin("1234");` - Validate string against a PIN. Clears buffer automatically.
   - `integrall.keypadClear();` - Clear the input buffer.
 
@@ -206,9 +209,10 @@ Professional MJPEG streaming with zero boilerplate.
 - **Pick your Board**: Define your model at the **very top** of your sketch (e.g., `#define CAMERA_MODEL_AI_THINKER`). If none is defined, AI-Thinker is used by default.
 - **Supported Models**: AI-Thinker, Wrover Kit, ESP-EYE, M5Stack (all versions), TTGO T-Journal, Xiao ESP32S3, DFRobot FireBeetle2/Romeo, and more.
 - **Commands**:
-  - `integrall.enableCamera();` - Inits hardware and **auto-starts** a web server on Port 81 as soon as WiFi connects.
+  - `integrall.enableCamera();` - Initializes the camera hardware (QVGA JPEG default to preserve DRAM).
+  - `integrall.startCameraServer();` - Starts the MJPEG stream server on Port 81 (opt-in to save RAM when only capturing snapshots).
   - `const char* url = integrall.getCameraStreamURL();` - Get the link to your live video feed.
-  - `integrall.startCameraServer();` - Manually start/restart the server if needed.
+  - `camera_fb_t* fb = integrall.cameraCapture();` / `integrall.cameraRelease(fb);` - Capture and release a single JPEG frame.
 
 **Smart Memory Management**: Integrall automatically detects if your board has **PSRAM**. If it does, it enables High-Quality UXGA (1600x1200) streaming. If not, it safely downscales to prevent crashes.
 

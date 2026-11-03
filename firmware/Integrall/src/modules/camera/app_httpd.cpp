@@ -13,7 +13,7 @@
 // limitations under the License.
 #include "../../config/IntegrallConfig.h"
 
-#if defined(ESP32)
+#if defined(ESP32) && __has_include("esp_camera.h") && __has_include("esp_http_server.h")
 
 #include "esp_http_server.h"
 #include "esp_timer.h"
@@ -33,8 +33,8 @@
 #if defined(LED_GPIO_NUM)
 #define CONFIG_LED_MAX_INTENSITY 255
 
-int led_duty = 0;
-bool isStreaming = false;
+static int led_duty = 0;
+static bool isStreaming = false;
 
 #endif
 
@@ -48,8 +48,8 @@ static const char *_STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" 
 static const char *_STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char *_STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\nX-Timestamp: %d.%06d\r\n\r\n";
 
-httpd_handle_t stream_httpd = NULL;
-httpd_handle_t camera_httpd = NULL;
+static httpd_handle_t stream_httpd = NULL;
+static httpd_handle_t camera_httpd = NULL;
 
 typedef struct {
   size_t size;   //number of values used for filtering
@@ -92,12 +92,16 @@ static int ra_filter_run(ra_filter_t *filter, int value) {
 #endif
 
 #if defined(LED_GPIO_NUM)
-void enable_led(bool en) {  // Turn LED On or Off
+static void enable_led(bool en) {  // Turn LED On or Off
   int duty = en ? led_duty : 0;
   if (en && isStreaming && (led_duty > CONFIG_LED_MAX_INTENSITY)) {
     duty = CONFIG_LED_MAX_INTENSITY;
   }
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
   ledcWrite(LED_GPIO_NUM, duty);
+#else
+  ledcWrite(2, duty);
+#endif
   log_i("Set LED intensity to %d", duty);
 }
 #endif
@@ -771,8 +775,13 @@ void startCameraServer() {
 
 void setupLedFlash() {
 #if defined(LED_GPIO_NUM)
+  #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
   ledcAttach(LED_GPIO_NUM, 5000, 8);
+  #else
+  ledcSetup(2, 5000, 8);
+  ledcAttachPin(LED_GPIO_NUM, 2);
+  #endif
 #endif
 }
 
-#endif // defined(ESP32)
+#endif // defined(ESP32) && __has_include("esp_camera.h")

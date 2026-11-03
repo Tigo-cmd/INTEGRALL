@@ -19,8 +19,8 @@ namespace Integrall {
 class BuzzerModule {
 public:
     BuzzerModule() : _pin(255), _initialized(false), _pattern_active(false), 
-                     _pattern_count(0), _on_ms(0), _off_ms(0), _last_ms(0), 
-                     _in_on_phase(false), _freq(2000), _is_success(false) {}
+                     _pattern_count(0), _freq(2000), _on_ms(0), _off_ms(0),
+                     _last_ms(0), _in_on_phase(false), _is_success(false) {}
 
     bool begin(uint8_t pin) {
         _pin = pin;
@@ -60,8 +60,8 @@ public:
      */
     void success() { 
         if(!_pattern_active) {
-            _is_success = true;
             pattern(2, 100, 50, 1500); // Start with 1500Hz
+            _is_success = true;
         }
     }
 

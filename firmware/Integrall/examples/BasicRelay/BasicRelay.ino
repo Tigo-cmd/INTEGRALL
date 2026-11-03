@@ -66,6 +66,7 @@ void setup() {
     Serial.println("Setup complete. Device should be online shortly.");
     Serial.print("Device ID: ");
     Serial.println(integrall.getDeviceId());
+    pinMode(2, OUTPUT);
 }
 
 void loop() {

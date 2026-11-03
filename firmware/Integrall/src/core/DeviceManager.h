@@ -57,7 +57,7 @@ struct DeviceConfig {
     const char* backend_url = nullptr;      // e.g., "http://192.168.1.100:8000"
     const char* api_key = nullptr;
     uint16_t backend_port = 8000;
-    bool use_wifi_manager = false;          // If true, launch captive portal on fail
+    bool use_wifi_manager = false;          // If true, launch captive portal / AP
     uint32_t wifi_connect_timeout_ms = 10000;
     uint32_t reconnect_interval_ms = 5000;
     uint32_t poll_interval_ms = 3000;
@@ -136,10 +136,11 @@ private:
     char _device_id[32];
     char _device_ip[16];
     char _last_error[64];
+    bool _wifi_configured;
     
     // Timing
     unsigned long _last_reconnect_attempt;
-    unsigned long _last_poll_time;
+    unsigned long _last_register_attempt;
     unsigned long _registration_retry_count;
     
     // HTTP client
@@ -155,18 +156,11 @@ private:
     bool _connectWiFi();
     void _handleWiFiReconnect();
     bool _registerWithBackend();
-    void _checkBackendCommands();
     void _setState(DeviceState new_state);
     void _setError(const char* error);
+    void _updateIpFromWiFi();
     
     String _last_response;
-    
-    // WiFi event handlers (static because WiFi.onEvent requires static)
-    #if defined(ESP32) && INTEGRALL_NETWORK_AVAILABLE
-    static void _onWiFiConnected(WiFiEvent_t event, WiFiEventInfo_t info);
-    static void _onWiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info);
-    #endif
-    static DeviceManager* _instance;  // Singleton pointer for callbacks
 };
 
 } // namespace Integrall

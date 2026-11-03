@@ -199,6 +199,8 @@ public:
             va_end(args);
             Serial.print(buffer);
         }
+        #else
+        (void)format;
         #endif
     }
 
@@ -216,6 +218,8 @@ public:
             va_end(args);
             Serial.println(buffer);
         }
+        #else
+        (void)format;
         #endif
     }
 
@@ -538,6 +542,13 @@ public:
     }
 
     /**
+     * Get the last key that was pressed
+     */
+    char keypadLastKey() const {
+        return _keypad_module.getLastKey();
+    }
+
+    /**
      * Accumulate keypresses into a string buffer.
      * '#' submits, '*' is backspace.
      */
@@ -586,27 +597,44 @@ public:
      */
     void lockSetup(const char* pin, int relayIndex,
                    uint32_t unlockMs = 5000, uint8_t maxRetries = 3) {
-        strncpy(_lock_pin, pin, sizeof(_lock_pin) - 1);
+        if (pin) {
+            INTEGRALL_SAFE_STRCPY(_lock_pin, pin, sizeof(_lock_pin));
+        }
         _lock_relay      = relayIndex;
         _lock_unlock_ms  = unlockMs;
         _lock_max_tries  = maxRetries;
         _lock_tries      = 0;
         _lock_locked_out = false;
+        _lock_state      = 0;
+        _lock_state_ts   = 0;
         _lock_active     = true;
         relaySetTimeout(relayIndex, unlockMs);
         _lockShowIdle();
     }
 
     /**
-     * Call this in loop() to run the entire lock system.
+     * Call this in loop() to run the entire lock system (non-blocking).
      * Handles: key capture, asterisk display, PIN check,
      *          LCD feedback, relay control, and lockout logic.
      */
     void lockUpdate() {
-        if (!_lock_active) return;
+        if (!_lock_active || _lock_locked_out) return;
 
-        if (_lock_locked_out) {
-            // Stay locked out — do nothing until reset
+        unsigned long now = millis();
+        if (_lock_state == 1) { // Unlocked display wait
+            if (now - _lock_state_ts >= _lock_unlock_ms) {
+                _lock_state = 0;
+                _keypad_module.clearBuffer();
+                _lockShowIdle();
+            }
+            return;
+        }
+        if (_lock_state == 2) { // Denied display wait
+            if (now - _lock_state_ts >= 2000) {
+                _lock_state = 0;
+                _keypad_module.clearBuffer();
+                _lockShowIdle();
+            }
             return;
         }
 
@@ -618,7 +646,7 @@ public:
         char row1[17];
         uint8_t len = strlen(input);
         if (len == 0) {
-            strncpy(row1, "  Enter PIN:    ", 17);
+            memcpy(row1, "  Enter PIN:    ", 17);
         } else {
             for (uint8_t i = 0; i < 16; i++)
                 row1[i] = (i < len) ? '*' : ' ';
@@ -630,19 +658,25 @@ public:
         // When '#' is pressed, evaluate the PIN
         if (_keypad_module.isSubmitted()) {
             if (_keypad_module.checkPin(_lock_pin)) {
-                // ✅ Correct PIN
+                // Correct PIN
                 _lock_tries = 0;
                 #if INTEGRALL_MODULE_LCD_ENABLED
                 _lcd_module.print("  ** UNLOCKED **", 0, 0);
                 _lcd_module.print("   Welcome!     ", 0, 1);
                 #endif
+                #if INTEGRALL_MODULE_BUZZER_ENABLED
+                _buzzer_module.success();
+                #endif
                 _logEvent("lock", "unlocked");
                 relayOn(_lock_relay);
-                delay(_lock_unlock_ms);
-                _lockShowIdle();
+                _lock_state = 1;
+                _lock_state_ts = now;
             } else {
-                // ❌ Wrong PIN
+                // Wrong PIN
                 _lock_tries++;
+                #if INTEGRALL_MODULE_BUZZER_ENABLED
+                _buzzer_module.failure();
+                #endif
                 _logEvent("lock", "denied");
                 if (_lock_max_tries > 0 && _lock_tries >= _lock_max_tries) {
                     // Lockout activated
@@ -653,14 +687,14 @@ public:
                     #endif
                 } else {
                     #if INTEGRALL_MODULE_LCD_ENABLED
-                    char msg[17];
-                    snprintf(msg, sizeof(msg), " Wrong! (%d left)",
-                             _lock_max_tries - _lock_tries);
+                    char msg[24];
+                    snprintf(msg, sizeof(msg), " Wrong! (%u left)",
+                             (unsigned int)(_lock_max_tries - _lock_tries));
                     _lcd_module.print("  !! DENIED !!  ", 0, 0);
                     _lcd_module.print(msg, 0, 1);
                     #endif
-                    delay(2000);
-                    _lockShowIdle();
+                    _lock_state = 2;
+                    _lock_state_ts = now;
                 }
             }
             _keypad_module.clearBuffer();
@@ -673,6 +707,8 @@ public:
     void lockReset() {
         _lock_tries      = 0;
         _lock_locked_out = false;
+        _lock_state      = 0;
+        _keypad_module.clearBuffer();
         _lockShowIdle();
     }
 
@@ -789,16 +825,20 @@ public:
     void setServoFromAnalog(int index, uint8_t analogPin) { _servo_module.setFromAnalog(index, analogPin); }
 
     /**
-     * Non-blocking sweep. Call this in loop() to keep the motor sweeping
+     * Non-blocking sweep.
+     * Single-servo: sweepServo(speed_ms) sweeps servo 0.
+     * Multi-servo:  sweepServo(index, speed_ms) sweeps the specified servo.
      */
     void sweepServo(uint32_t speed_ms = 15) { _servo_module.sweep(0, speed_ms); }
-    void sweepServo(int index, uint32_t speed_ms = 15) { _servo_module.sweep(index, speed_ms); }
+    void sweepServo(int index, uint32_t speed_ms) { _servo_module.sweep(index, speed_ms); }
 
     /**
      * Non-blocking ease move. Slowly moves the servo to a target angle in the background.
+     * Single-servo: easeServo(targetAngle, speed_ms) eases servo 0.
+     * Multi-servo:  easeServo(index, targetAngle, speed_ms) eases the specified servo.
      */
     void easeServo(uint8_t targetAngle, uint32_t speed_ms = 15) { _servo_module.easeTo(0, targetAngle, speed_ms); }
-    void easeServo(int index, uint8_t targetAngle, uint32_t speed_ms = 15) { _servo_module.easeTo(index, targetAngle, speed_ms); }
+    void easeServo(int index, uint8_t targetAngle, uint32_t speed_ms) { _servo_module.easeTo(index, targetAngle, speed_ms); }
 
     #endif // INTEGRALL_MODULE_SERVO_ENABLED
 
@@ -873,13 +913,11 @@ public:
     // ========================================================================
     #if INTEGRALL_MODULE_AUDIO_ENABLED
     #if INTEGRALL_DFPLAYER_AVAILABLE
-    bool audioBeginDF(HardwareSerial& p, int rx, int tx) { return _audio_module.beginDFPlayer(p, rx, tx); }
-    void audioPlay(int track)                            { _audio_module.playTrack(track); }
-    void audioVolume(int v)                              { _audio_module.setVolume(v); }
+    bool audioBeginDF(HardwareSerial& p, int rx = -1, int tx = -1) { return _audio_module.beginDFPlayer(p, rx, tx); }
+    void audioPlay(int track)                                      { _audio_module.playTrack(track); }
+    void audioVolume(int v)                                        { _audio_module.setVolume(v); }
     #endif
-    #if defined(ESP32)
     int audioSoundLevel(uint8_t pin) { return _audio_module.readSoundLevel(pin); }
-    #endif
     #endif
 
     // ========================================================================
@@ -894,17 +932,17 @@ public:
 
     // extra input methods
     #if INTEGRALL_MODULE_INPUT_ENABLED
-    #if __has_include(<MFRC522.h>)
+    #if INTEGRALL_RFID_AVAILABLE
     String inputReadRFID(uint8_t ss = 5, uint8_t rst = 0) { return _input_module.readRFID(ss, rst); }
     #endif
-    #if __has_include(<IRremote.h>)
+    #if INTEGRALL_IR_AVAILABLE
     uint32_t inputReadIR(uint8_t pin) { return _input_module.readIR(pin); }
     #endif
     #endif
 
     // extra time methods
     #if INTEGRALL_MODULE_TIME_ENABLED
-    #if __has_include(<TinyGPS++.h>)
+    #if INTEGRALL_GPS_AVAILABLE
     void timeGetGPS(HardwareSerial& p, float &lat, float &lng) { _time_module.getGPSLocation(p, lat, lng); }
     #endif
     #endif
@@ -1106,6 +1144,18 @@ public:
         _lcd_module.print(row1, 0, 1);
         #endif
         // Auto-send to backend if online
+        #if INTEGRALL_NETWORK_AVAILABLE
+        if (isWiFiConnected() && _config.backend_url) {
+            #if ARDUINOJSON_VERSION_MAJOR >= 7
+            JsonDocument doc;
+            #else
+            StaticJsonDocument<128> doc;
+            #endif
+            doc["temperature"] = t;
+            doc["humidity"] = h;
+            sendTelemetry(doc);
+        }
+        #endif
         _logEvent("weather", "ok");
     }
 
@@ -1338,18 +1388,20 @@ private:
 
     // Lock system state
     #if INTEGRALL_MODULE_KEYPAD_ENABLED && INTEGRALL_MODULE_RELAY_ENABLED
-    bool     _lock_active     = false;
-    bool     _lock_locked_out = false;
-    int      _lock_relay      = 0;
-    uint32_t _lock_unlock_ms  = 5000;
-    uint8_t  _lock_max_tries  = 3;
-    uint8_t  _lock_tries      = 0;
-    char     _lock_pin[17]    = "";
+    bool          _lock_active     = false;
+    bool          _lock_locked_out = false;
+    uint8_t       _lock_state      = 0; // 0: idle, 1: unlocked wait, 2: denied wait
+    unsigned long _lock_state_ts   = 0;
+    int           _lock_relay      = 0;
+    uint32_t      _lock_unlock_ms  = 5000;
+    uint8_t       _lock_max_tries  = 3;
+    uint8_t       _lock_tries      = 0;
+    char          _lock_pin[17]    = "";
 
     void _lockShowIdle() {
         #if INTEGRALL_MODULE_LCD_ENABLED
         _lcd_module.print("  === LOCK ===  ", 0, 0);
-        _lcd_module.print("  Enter PIN:   ", 0, 1);
+        _lcd_module.print("  Enter PIN:    ", 0, 1);
         #endif
     }
     #endif
@@ -1397,10 +1449,16 @@ private:
      * Internal helper to log events to backend and serial
      */
     void _logEvent(const char* event_type, const char* detail) {
+        (void)event_type;
+        (void)detail;
         INTEGRALL_LOG_INFO_VAL("Event: ", event_type);
         #if INTEGRALL_NETWORK_AVAILABLE
         if (_event_log_enabled && isOnline()) {
+            #if ARDUINOJSON_VERSION_MAJOR >= 7
+            JsonDocument doc;
+            #else
             StaticJsonDocument<128> doc;
+            #endif
             doc["event"] = event_type;
             doc["detail"] = detail;
             sendTelemetry(doc);
@@ -1408,10 +1466,8 @@ private:
         #endif
     }
 
+    void _beginModules();
     void _handleModules();
-    #if INTEGRALL_NETWORK_AVAILABLE
-    void _dispatchCommand(const char* command_type, const JsonObject& params);
-    #endif
 };
 
 } // namespace Integrall
@@ -1433,21 +1489,7 @@ System::System()
 System::~System() {
 }
 
-bool System::begin(const DeviceConfig& config) {
-    // 0. The ABSOLUTE first step is starting the Serial port for debugging
-    Logger::begin(115200); 
-    
-    _config = config;
-    
-    INTEGRALL_LOG_INFO("=== Integrall System Starting ===");
-    
-    // Initialize device manager (WiFi, backend)
-    if (!_device_manager.begin(config)) {
-        INTEGRALL_LOG_ERROR("DeviceManager initialization failed");
-        return false;
-    }
-    
-    // Initialize enabled modules
+void System::_beginModules() {
     #if INTEGRALL_MODULE_RELAY_ENABLED
     if (!_relay_module.begin(4)) {  // Support up to 4 relays
         INTEGRALL_LOG_ERROR("RelayModule initialization failed");
@@ -1469,16 +1511,32 @@ bool System::begin(const DeviceConfig& config) {
     #endif
 
     #if INTEGRALL_MODULE_CAMERA_ENABLED
-    // Camera init should happen after WiFi if WiFi is intended, 
-    // but CameraModule itself handles the WiFi dependency now.
     if (!_camera_module.begin()) {
         INTEGRALL_LOG_ERROR("CameraModule initialization failed");
     }
     #endif
+}
+
+bool System::begin(const DeviceConfig& config) {
+    // 0. The ABSOLUTE first step is starting the Serial port for debugging
+    Logger::begin(115200); 
+    
+    _config = config;
+    
+    INTEGRALL_LOG_INFO("=== Integrall System Starting ===");
+    
+    // Initialize device manager (WiFi, backend)
+    bool net_ok = _device_manager.begin(config);
+    if (!net_ok) {
+        INTEGRALL_LOG_WARN("DeviceManager initial connection failed; continuing in background");
+    }
+    
+    // Always initialize enabled hardware modules even if WiFi is temporarily unreachable
+    _beginModules();
     
     _initialized = true;
     INTEGRALL_LOG_INFO("=== Integrall System Ready ===");
-    return true;
+    return net_ok;
 }
 
 void System::handle() {
@@ -1487,28 +1545,19 @@ void System::handle() {
     // Handle core device management
     _device_manager.handle();
     
-    // Auto-update LCD with WiFi status if enabled
+    // Auto-update LCD with WiFi status only on state changes when WiFi is configured
     #if INTEGRALL_MODULE_LCD_ENABLED && INTEGRALL_MODULE_WIFI_ENABLED
-    static unsigned long _last_status_update = 0;
-    if (millis() - _last_status_update > 5000) {
-        if (!isWiFiConnected()) {
-            _lcd_module.print("WiFi Discon...", 0, 1);
-        } else if (!isOnline()) {
-            _lcd_module.print("Backend Error", 0, 1);
+    if (_config.wifi_ssid && strlen(_config.wifi_ssid) > 0 && !_config.use_wifi_manager) {
+        static int _last_lcd_net_state = -1;
+        int cur_state = !isWiFiConnected() ? 0 : (!isOnline() ? 1 : 2);
+        if (cur_state != _last_lcd_net_state) {
+            _last_lcd_net_state = cur_state;
+            if (cur_state == 0) {
+                _lcd_module.print("WiFi Discon...", 0, 1);
+            } else if (cur_state == 1 && _config.backend_url && _config.api_key) {
+                _lcd_module.print("Syncing Cloud..", 0, 1);
+            }
         }
-        _last_status_update = millis();
-    }
-    #endif
-
-    // Auto-start Camera Server when WiFi becomes available
-    #if INTEGRALL_MODULE_CAMERA_ENABLED && INTEGRALL_MODULE_WIFI_ENABLED
-    if (isWiFiConnected() && !_camera_module.isServerRunning()) {
-        _camera_module.startServer();
-        INTEGRALL_LOG_INFO("Camera: MJPEG server started!");
-        INTEGRALL_LOG_INFO_VAL("Stream available at: ", getIPAddress());
-        Serial.print(">> [CAM LINK] http://");
-        Serial.print(getIPAddress());
-        Serial.println(":81/stream");
     }
     #endif
 
@@ -1517,28 +1566,20 @@ void System::handle() {
 }
 
 bool System::begin() {
-    // Ensure the core device manager starts (this initializes Serial/Logger)
     DeviceConfig defaultConfig;
-    _device_manager.begin(defaultConfig);
-    
-    INTEGRALL_LOG_INFO("=== Integrall Module Initialization ===");
-    
-    #if INTEGRALL_MODULE_LCD_ENABLED
-    if (!_lcd_module.begin()) {
-        INTEGRALL_LOG_ERROR("LCDModule initialization failed");
-    }
+    #ifdef INTEGRALL_DEFAULT_SSID
+    defaultConfig.wifi_ssid = INTEGRALL_DEFAULT_SSID;
     #endif
-
-    #if INTEGRALL_MODULE_OLED_ENABLED
-    if (!_oled_module.begin()) {
-        INTEGRALL_LOG_ERROR("OLEDModule initialization failed! Check I2C wiring.");
-    } else {
-        INTEGRALL_LOG_INFO("OLED Connected Successfully");
-    }
+    #ifdef INTEGRALL_DEFAULT_PASS
+    defaultConfig.wifi_password = INTEGRALL_DEFAULT_PASS;
     #endif
-
-    _initialized = true;
-    return true;
+    #ifdef INTEGRALL_DEFAULT_BACKEND_URL
+    defaultConfig.backend_url = INTEGRALL_DEFAULT_BACKEND_URL;
+    #endif
+    #ifdef INTEGRALL_DEFAULT_API_KEY
+    defaultConfig.api_key = INTEGRALL_DEFAULT_API_KEY;
+    #endif
+    return begin(defaultConfig);
 }
 
 void System::_handleModules() {
@@ -1679,7 +1720,11 @@ void System::reconnect() {
      * Send a single numeric value to the cloud backend
      */
     bool System::sendTelemetry(const char* key, float value) {
+        #if ARDUINOJSON_VERSION_MAJOR >= 7
+        JsonDocument doc;
+        #else
         StaticJsonDocument<128> doc;
+        #endif
         doc[key] = value;
         return _device_manager.sendTelemetry(doc);
     }
@@ -1688,7 +1733,11 @@ void System::reconnect() {
      * Send a single string value to the cloud backend
      */
     bool System::sendTelemetry(const char* key, const char* value) {
+        #if ARDUINOJSON_VERSION_MAJOR >= 7
+        JsonDocument doc;
+        #else
         StaticJsonDocument<128> doc;
+        #endif
         doc[key] = value;
         return _device_manager.sendTelemetry(doc);
     }

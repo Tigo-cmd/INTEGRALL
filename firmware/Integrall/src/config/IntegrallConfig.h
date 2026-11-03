@@ -15,12 +15,19 @@
 #endif
 
 #ifndef INTEGRALL_VERSION_STRING
-  #define INTEGRALL_VERSION_STRING "1.0.0"
+  #define INTEGRALL_VERSION_STRING "1.1.0"
 #endif
 
 #ifndef INTEGRALL_BACKEND_ENABLED
   #define INTEGRALL_BACKEND_ENABLED 1
 #endif
+
+// Optional global credentials ("Set and Forget" mode)
+// Define these in your sketch BEFORE #include <Integrall.h> or edit here:
+// #define INTEGRALL_DEFAULT_SSID        "YourWifiName"
+// #define INTEGRALL_DEFAULT_PASS        "YourWifiPassword"
+// #define INTEGRALL_DEFAULT_BACKEND_URL "http://192.168.1.100:8000"
+// #define INTEGRALL_DEFAULT_API_KEY     "your-api-key"
 
 // ============================================================================
 // CORE HELPER MACROS

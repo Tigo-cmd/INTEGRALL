@@ -50,17 +50,17 @@ Integrall abstracts the complexity of these components into non-blocking, event-
 | | | | |
 | :--- | :--- | :--- | :--- |
 | **Relays** | **Power (INA219)** | **Rich Audio (MP3)** | **ESP32-CAM** |
-| **Sensors (10+)** | **Time & GPS** | **Security Presets** | **Input UI** |
+| **Sensors & IMU** | **Time & GPS** | **Security Presets** | **Input UI** |
 | **LCD / OLED** | **Wireless (LoRa/BLE)** | **SD Storage** | **Servo/Stepper** |
-| **Buzzer** | **RGB LED** | **Keypad** | **Blinker** |
+| **Buzzer** | **RGB LED** | **Keypad** | **Cellular (GSM)** |
 
 ### Module Highlights
 1. **Relay Logic**: Auto-off safety timeouts, interlock groups, and hardware button overrides.
-2. **Display Hub**: Smart scrolling for LCD and hardware-accelerated progress bars for OLED.
-3. **Sensor Engine**: Multi-sample averaging for HC-SR04, semantic motion sensing, and high-precision environmental monitoring (BME280).
-4. **Security Auth**: Integrated matrix keypad support with password buffer and lockout management.
-5. **Motion Control**: Non-blocking servo easing/sweeping and stepper rotation.
-6. **Edge Vision**: MJPEG streaming server for ESP32-CAM with zero-boilerplate setup.
+2. **Display Hub**: Smart row-cached scrolling for LCD and opaque hardware-accelerated progress bars for OLED.
+3. **Sensor & IMU Engine**: Multi-sample averaging for HC-SR04, cached DHT/DS18B20/BME280 drivers, scientific psychrometrics (Magnus-Tetens dew point & NOAA Rothfusz heat index), and 6-axis MPU6050 fall/posture detection.
+4. **Security Auth**: Integrated matrix keypad support with password buffer and non-blocking lockout management.
+5. **Motion Control**: Non-blocking servo easing/sweeping (12-bit ESP32 ADC aware) and stepper rotation.
+6. **Edge Vision & Cellular**: RAM-safe MJPEG streaming server & multipart uploader for ESP32-CAM, plus SIM800L GSM/SMS alerts.
 
 ---
 
@@ -152,7 +152,8 @@ Utility methods include: `isWiFiConnected()`, `getIPAddress()`, `getWiFiStrength
 - [x] **v0.8 Expansion**: Camera, Rich Audio, Input UI, Storage, Time/GPS, Power, Stepper, Communication (BLE/LoRa).
 - [x] **Project Presets**: Smart Lock, Alarm System, Weather Station, Parking Sensor, Smart Switch.
 - [x] **v1.0 Backend**: 🐍 Flask cloud backend with device telemetry, live React dashboard, and redundant sensor analysis.
-- [ ] **v1.1 Fleet**: Advanced Device Management, OTA Updates, and MQTT Broker Integration.
+- [x] **v1.1.0 Firmware & Core**: 100% non-blocking state machines, multi-arch (ESP32/ESP8266/AVR) & ArduinoJson v7 support, cached sensor/LCD drivers, MPU6050 IMU fall detection, and SIM800L Cellular SMS/Voice.
+- [ ] **v1.2 Fleet**: OTA Firmware Updates and MQTT Broker Integration.
 
 ## Contributing
 Integrall is an open-source project. We welcome contributions for new hardware modules, bug fixes, and documentation improvements.
