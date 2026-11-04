@@ -231,17 +231,33 @@ Control multi-color LEDs with named colors or RGB values.
   - `integrall.rgbBlink(r, g, b, ms);` - **Non-blocking** color blink.
   - `integrall.rgbOff();` - Turn off.
 
-### 9. ESP32-CAM Video Stream
-Professional MJPEG streaming with zero boilerplate.
+### 9. Universal ESP32-CAM Vision & Video Stream
+Professional MJPEG streaming and AI snapshot capture across **19+ ESP32 / ESP32-S2 / ESP32-S3 camera boards** and **multiple ribbon sensors (`OV2640`, `OV3660`, `OV5640`, `GC2145`)** with zero boilerplate.
 - **Setup**: `#define INTEGRALL_ENABLE_CAMERA`
-- **Requires**: `#define INTEGRALL_ENABLE_WIFI` (Camera will be disabled without WiFi)
-- **Pick your Board**: Define your model at the **very top** of your sketch (e.g., `#define CAMERA_MODEL_AI_THINKER`). If none is defined, AI-Thinker is used by default.
-- **Supported Models**: AI-Thinker, Wrover Kit, ESP-EYE, M5Stack (all versions), TTGO T-Journal, Xiao ESP32S3, DFRobot FireBeetle2/Romeo, and more.
+- **Requires**: `#define INTEGRALL_ENABLE_WIFI`
+- **Supported Carrier Boards (`CameraBoard` Enum)**:
+  - `CAM_BOARD_AI_THINKER` (Default AI-Thinker ESP32-CAM)
+  - `CAM_BOARD_XIAO_ESP32S3` (Seeed Studio XIAO ESP32S3 Sense)
+  - `CAM_BOARD_FREENOVE_S3` (Freenove ESP32-S3-WROOM CAM)
+  - `CAM_BOARD_WROVER_KIT` (ESP-WROVER-KIT / Freenove WROVER CAM)
+  - `CAM_BOARD_ESP_EYE` / `CAM_BOARD_ESP32S3_EYE` (Espressif ESP-EYE & ESP32-S3-EYE)
+  - `CAM_BOARD_M5STACK_PSRAM`, `CAM_BOARD_M5STACK_V2_PSRAM`, `CAM_BOARD_M5STACK_WIDE`, `CAM_BOARD_M5STACK_ESP32CAM`, `CAM_BOARD_M5STACK_UNITCAM`, `CAM_BOARD_M5STACK_CAMS3_UNIT`
+  - `CAM_BOARD_TTGO_T_JOURNAL`, `CAM_BOARD_LILYGO_T_CAMERA_PLUS`, `CAM_BOARD_LILYGO_T_SIMCAM`
+  - `CAM_BOARD_DFROBOT_FIREBEETLE2_S3`, `CAM_BOARD_ESP32_CAM_BOARD`, `CAM_BOARD_ESP32S2_CAM_BOARD`, `CAM_BOARD_ESP32S3_CAM_LCD`
+  - Custom PCBs via `Integrall::CameraPins` struct
+- **Automatic Ribbon Sensor Tuning**: Integrall automatically inspects the camera ribbon PID (`OV2640`, `OV3660`, `OV5640`, `GC2145`, etc.) after initialization and applies orientation (`vflip`/`hmirror`) and color/saturation corrections out of the box.
 - **Commands**:
-  - `integrall.enableCamera();` - Initializes the camera hardware (QVGA JPEG default to preserve DRAM).
-  - `integrall.startCameraServer();` - Starts the MJPEG stream server on Port 81 (opt-in to save RAM when only capturing snapshots).
-  - `const char* url = integrall.getCameraStreamURL();` - Get the link to your live video feed.
+  - `integrall.setCameraBoard(CAM_BOARD_XIAO_ESP32S3);` - Optional pre-selection before `integrall.begin()`.
+  - `integrall.enableCamera();` or `integrall.enableCamera(CAM_BOARD_XIAO_ESP32S3, FRAMESIZE_VGA, 10);` - Initialize (or re-configure) camera hardware for any board, resolution (`FRAMESIZE_QVGA`, `FRAMESIZE_VGA`, `FRAMESIZE_SVGA`, `FRAMESIZE_HD`, `FRAMESIZE_UXGA`), and JPEG quality (`4–63`).
+  - `integrall.startCameraServer();` - Starts the control UI on Port 80 and MJPEG stream server on Port 81 (`/stream`).
+  - `const char* url = integrall.getCameraStreamURL();` - Get the live video stream URL.
   - `camera_fb_t* fb = integrall.cameraCapture();` / `integrall.cameraRelease(fb);` - Capture and release a single JPEG frame.
+  - `integrall.setCameraResolution(FRAMESIZE_SVGA);` / `integrall.setCameraQuality(10);` - Adjust resolution or compression on the fly.
+  - `integrall.setCameraFlip(vflip, hmirror);` - Flip or mirror the image at runtime.
+  - `integrall.setCameraBrightness(level);` / `setCameraContrast(level);` / `setCameraSaturation(level);` - Image tuning (`-2` to `+2`).
+  - `integrall.setCameraEffect(effect);` / `integrall.setCameraWhiteBalance(enable, mode);` - Hardware special effects (`0–6`) and white balance modes (`0–4`).
+  - `integrall.setCameraFlash(intensity);` - Control the board's Flash LED (`0–255` PWM brightness).
+  - `integrall.getCameraBoardName();` / `integrall.getCameraSensorName();` - Inspect active board profile and detected ribbon sensor (`"OV2640"`, `"OV3660"`, `"OV5640"`, etc.).
 
 **Smart Memory Management**: Integrall automatically detects if your board has **PSRAM**. If it does, it enables High-Quality UXGA (1600x1200) streaming. If not, it safely downscales to prevent crashes.
 

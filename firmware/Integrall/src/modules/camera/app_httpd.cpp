@@ -29,14 +29,13 @@
 #include "esp32-hal-log.h"
 #endif
 
-// LED FLASH setup
-#if defined(LED_GPIO_NUM)
+// LED FLASH setup (runtime configurable per camera board)
 #define CONFIG_LED_MAX_INTENSITY 255
 
+static int s_led_pin = -1;
 static int led_duty = 0;
 static bool isStreaming = false;
-
-#endif
+static bool s_led_attached = false;
 
 typedef struct {
   httpd_req_t *req;
@@ -91,20 +90,19 @@ static int ra_filter_run(ra_filter_t *filter, int value) {
 }
 #endif
 
-#if defined(LED_GPIO_NUM)
 static void enable_led(bool en) {  // Turn LED On or Off
+  if (s_led_pin < 0 || !s_led_attached) return;
   int duty = en ? led_duty : 0;
   if (en && isStreaming && (led_duty > CONFIG_LED_MAX_INTENSITY)) {
     duty = CONFIG_LED_MAX_INTENSITY;
   }
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcWrite(LED_GPIO_NUM, duty);
+  ledcWrite(s_led_pin, duty);
 #else
   ledcWrite(2, duty);
 #endif
   log_i("Set LED intensity to %d", duty);
 }
-#endif
 
 static esp_err_t bmp_handler(httpd_req_t *req) {
   camera_fb_t *fb = NULL;
@@ -164,14 +162,14 @@ static esp_err_t capture_handler(httpd_req_t *req) {
   int64_t fr_start = esp_timer_get_time();
 #endif
 
-#if defined(LED_GPIO_NUM)
-  enable_led(true);
-  vTaskDelay(150 / portTICK_PERIOD_MS);  
-  fb = esp_camera_fb_get();              
-  enable_led(false);
-#else
-  fb = esp_camera_fb_get();
-#endif
+  if (s_led_pin >= 0 && led_duty > 0) {
+    enable_led(true);
+    vTaskDelay(150 / portTICK_PERIOD_MS);
+    fb = esp_camera_fb_get();
+    enable_led(false);
+  } else {
+    fb = esp_camera_fb_get();
+  }
 
   if (!fb) {
     log_e("Camera capture failed");
@@ -232,10 +230,10 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_set_hdr(req, "X-Framerate", "60");
 
-#if defined(LED_GPIO_NUM)
-  isStreaming = true;
-  enable_led(true);
-#endif
+  if (s_led_pin >= 0) {
+    isStreaming = true;
+    enable_led(true);
+  }
 
   while (true) {
     fb = esp_camera_fb_get();
@@ -295,10 +293,10 @@ static esp_err_t stream_handler(httpd_req_t *req) {
     );
   }
 
-#if defined(LED_GPIO_NUM)
-  isStreaming = false;
-  enable_led(false);
-#endif
+  if (s_led_pin >= 0) {
+    isStreaming = false;
+    enable_led(false);
+  }
 
   return res;
 }
@@ -394,16 +392,12 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
     res = s->set_wb_mode(s, val);
   } else if (!strcmp(variable, "ae_level")) {
     res = s->set_ae_level(s, val);
-  }
-#if defined(LED_GPIO_NUM)
-  else if (!strcmp(variable, "led_intensity")) {
+  } else if (!strcmp(variable, "led_intensity") && s_led_pin >= 0) {
     led_duty = val;
     if (isStreaming) {
       enable_led(true);
     }
-  }
-#endif
-  else {
+  } else {
     log_i("Unknown command: %s", variable);
     res = -1;
   }
@@ -483,11 +477,11 @@ static esp_err_t status_handler(httpd_req_t *req) {
   p += sprintf(p, "\"vflip\":%u,", s->status.vflip);
   p += sprintf(p, "\"dcw\":%u,", s->status.dcw);
   p += sprintf(p, "\"colorbar\":%u", s->status.colorbar);
-#if defined(LED_GPIO_NUM)
-  p += sprintf(p, ",\"led_intensity\":%u", led_duty);
-#else
-  p += sprintf(p, ",\"led_intensity\":%d", -1);
-#endif
+  if (s_led_pin >= 0) {
+    p += sprintf(p, ",\"led_intensity\":%u", led_duty);
+  } else {
+    p += sprintf(p, ",\"led_intensity\":%d", -1);
+  }
   *p++ = '}';
   *p++ = 0;
   httpd_resp_set_type(req, "application/json");
@@ -773,15 +767,42 @@ void startCameraServer() {
   }
 }
 
+void setupLedFlash(int pin) {
+  s_led_pin = pin;
+  if (s_led_pin >= 0 && !s_led_attached) {
+    #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcAttach(s_led_pin, 5000, 8);
+    #else
+    ledcSetup(2, 5000, 8);
+    ledcAttachPin(s_led_pin, 2);
+    #endif
+    s_led_attached = true;
+  }
+}
+
 void setupLedFlash() {
-#if defined(LED_GPIO_NUM)
+  if (s_led_pin >= 0) {
+    setupLedFlash(s_led_pin);
+  } else {
+    #if defined(LED_GPIO_NUM)
+    setupLedFlash(LED_GPIO_NUM);
+    #endif
+  }
+}
+
+void setCameraFlashDuty(int duty) {
+  if (s_led_pin < 0) return;
+  if (!s_led_attached) {
+    setupLedFlash(s_led_pin);
+  }
+  if (duty < 0) duty = 0;
+  if (duty > CONFIG_LED_MAX_INTENSITY) duty = CONFIG_LED_MAX_INTENSITY;
+  led_duty = duty;
   #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcAttach(LED_GPIO_NUM, 5000, 8);
+  ledcWrite(s_led_pin, duty);
   #else
-  ledcSetup(2, 5000, 8);
-  ledcAttachPin(LED_GPIO_NUM, 2);
+  ledcWrite(2, duty);
   #endif
-#endif
 }
 
 #endif // defined(ESP32) && __has_include("esp_camera.h")

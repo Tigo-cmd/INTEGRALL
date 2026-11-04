@@ -1034,14 +1034,43 @@ public:
     #if INTEGRALL_MODULE_CAMERA_ENABLED
 
     /**
-     * Start the camera hardware with default pins for the selected board
+     * Pre-select a camera carrier board or custom pinout before calling begin()
+     */
+    void setCameraBoard(CameraBoard board) {
+        _camera_module.setBoard(board);
+    }
+
+    void setCameraPins(const CameraPins& customPins) {
+        _camera_module.setCustomPins(customPins);
+    }
+
+    /**
+     * Start the camera hardware with default/pre-selected pins for the board
      */
     bool enableCamera() {
         return _camera_module.begin();
     }
 
     /**
-     * Manually start the MJPEG stream server if it didn't start automatically
+     * Start (or re-configure) the camera hardware for a specific ESP32-CAM board model
+     * @param board       CameraBoard enum (e.g., CAM_BOARD_AI_THINKER, CAM_BOARD_XIAO_ESP32S3, CAM_BOARD_FREENOVE_S3)
+     * @param frameSize   Initial resolution (default: FRAMESIZE_QVGA, or FRAMESIZE_VGA / FRAMESIZE_SVGA / FRAMESIZE_UXGA)
+     * @param jpegQuality JPEG compression (4 = highest quality, 63 = smallest file; -1 = auto)
+     * @param xclkMhz     External clock in MHz (default: 20)
+     */
+    bool enableCamera(CameraBoard board, framesize_t frameSize = FRAMESIZE_QVGA, int jpegQuality = -1, int xclkMhz = 20) {
+        return _camera_module.begin(board, frameSize, jpegQuality, xclkMhz);
+    }
+
+    /**
+     * Start (or re-configure) the camera hardware with a custom GPIO pinout struct
+     */
+    bool enableCamera(const CameraPins& customPins, framesize_t frameSize = FRAMESIZE_QVGA, int jpegQuality = -1, int xclkMhz = 20) {
+        return _camera_module.begin(customPins, frameSize, jpegQuality, xclkMhz);
+    }
+
+    /**
+     * Manually start the MJPEG stream server (:80 UI and :81/stream)
      */
     void startCameraServer() {
         _camera_module.startServer();
@@ -1070,6 +1099,22 @@ public:
     void cameraRelease(camera_fb_t* fb) {
         _camera_module.release(fb);
     }
+
+    /**
+     * Runtime camera resolution, quality, orientation, image tuning & Flash LED controls
+     */
+    bool setCameraResolution(framesize_t frameSize)            { return _camera_module.setResolution(frameSize); }
+    bool setCameraQuality(int quality)                         { return _camera_module.setQuality(quality); }
+    bool setCameraFlip(bool vflip, bool hmirror = false)       { return _camera_module.setFlip(vflip, hmirror); }
+    bool setCameraBrightness(int level)                        { return _camera_module.setBrightness(level); }
+    bool setCameraContrast(int level)                          { return _camera_module.setContrast(level); }
+    bool setCameraSaturation(int level)                        { return _camera_module.setSaturation(level); }
+    bool setCameraEffect(int effect)                           { return _camera_module.setSpecialEffect(effect); }
+    bool setCameraWhiteBalance(bool enable, int mode = 0)      { return _camera_module.setWhiteBalance(enable, mode); }
+    void setCameraFlash(uint8_t intensity)                     { _camera_module.setFlash(intensity); }
+    const char* getCameraSensorName() const                    { return _camera_module.getSensorName(); }
+    const char* getCameraBoardName() const                     { return _camera_module.getBoardName(); }
+    sensor_t* cameraSensor()                                   { return _camera_module.getSensor(); }
 
     #endif // INTEGRALL_MODULE_CAMERA_ENABLED
 
