@@ -1,7 +1,7 @@
 /**
  * DeviceManager.cpp
  * 
- * Implementation of device management core
+ * Implementation of device management core & HTTP/HTTPS REST client
  */
 
 #include "DeviceManager.h"
@@ -219,11 +219,7 @@ bool DeviceManager::_registerWithBackend() {
     char payload[512];
     serializeJson(doc, payload, sizeof(payload));
     
-    #if defined(ESP32)
-    _http.begin(url);
-    #else
-    _http.begin(_wifiClient, url);
-    #endif
+    if (!_beginHttpUrl(url)) return false;
 
     _http.addHeader("Content-Type", "application/json");
     _http.addHeader("X-API-Key", _config.api_key);
@@ -259,6 +255,95 @@ void DeviceManager::_setError(const char* error) {
 }
 
 #if INTEGRALL_NETWORK_AVAILABLE
+bool DeviceManager::_beginHttpUrl(const char* url) {
+    if (!url || strlen(url) == 0) return false;
+    _http.setTimeout(_http_timeout_ms);
+
+    bool isHttps = (strncmp(url, "https://", 8) == 0 || strncmp(url, "HTTPS://", 8) == 0);
+    if (isHttps) {
+        #if INTEGRALL_SECURE_AVAILABLE
+          #if defined(ESP32)
+          if (_root_ca && !_tls_insecure) {
+              _secureClient.setCACert(_root_ca);
+          } else {
+              _secureClient.setInsecure();
+          }
+          #else
+          _secureClient.setInsecure();
+          #endif
+          return _http.begin(_secureClient, url);
+        #else
+          #if defined(ESP32)
+          return _http.begin(url);
+          #else
+          return _http.begin(_wifiClient, url);
+          #endif
+        #endif
+    } else {
+        #if defined(ESP32)
+        return _http.begin(_wifiClient, url);
+        #else
+        return _http.begin(_wifiClient, url);
+        #endif
+    }
+}
+
+void DeviceManager::_applyCustomHeaders(const char* authToken) {
+    for (uint8_t i = 0; i < _custom_header_count; i++) {
+        if (_custom_headers[i].key.length() > 0) {
+            _http.addHeader(_custom_headers[i].key, _custom_headers[i].value);
+        }
+    }
+    const char* tokenToUse = (authToken && strlen(authToken) > 0)
+                             ? authToken
+                             : (_bearer_token.length() > 0 ? _bearer_token.c_str() : nullptr);
+    if (tokenToUse) {
+        if (strncmp(tokenToUse, "Bearer ", 7) == 0 || strncmp(tokenToUse, "Basic ", 6) == 0) {
+            _http.addHeader("Authorization", tokenToUse);
+        } else {
+            String authHdr = String("Bearer ") + tokenToUse;
+            _http.addHeader("Authorization", authHdr);
+        }
+    }
+}
+
+void DeviceManager::setHttpHeader(const char* key, const char* value) {
+    if (!key || strlen(key) == 0) return;
+    // Update if key already exists
+    for (uint8_t i = 0; i < _custom_header_count; i++) {
+        if (_custom_headers[i].key.equalsIgnoreCase(key)) {
+            _custom_headers[i].value = value ? value : "";
+            return;
+        }
+    }
+    if (_custom_header_count < MAX_CUSTOM_HEADERS) {
+        _custom_headers[_custom_header_count].key   = key;
+        _custom_headers[_custom_header_count].value = value ? value : "";
+        _custom_header_count++;
+    }
+}
+
+void DeviceManager::clearHttpHeaders() {
+    _custom_header_count = 0;
+}
+
+void DeviceManager::setBearerToken(const char* token) {
+    _bearer_token = token ? token : "";
+}
+
+void DeviceManager::setCACert(const char* rootCA) {
+    _root_ca = rootCA;
+    _tls_insecure = (rootCA == nullptr);
+}
+
+void DeviceManager::setHttpInsecure(bool insecure) {
+    _tls_insecure = insecure;
+}
+
+void DeviceManager::setHttpTimeout(uint16_t timeoutMs) {
+    _http_timeout_ms = timeoutMs > 0 ? timeoutMs : 10000;
+}
+
 bool DeviceManager::sendTelemetry(const JsonDocument& data) {
     #if INTEGRALL_BACKEND_ENABLED
     if (!isWiFiConnected() || !_config.backend_url || strlen(_config.backend_url) == 0) {
@@ -275,11 +360,7 @@ bool DeviceManager::sendTelemetry(const JsonDocument& data) {
     String payload;
     serializeJson(doc, payload);
     
-    #if defined(ESP32)
-    _http.begin(url);
-    #else
-    _http.begin(_wifiClient, url);
-    #endif
+    if (!_beginHttpUrl(url)) return false;
 
     _http.addHeader("Content-Type", "application/json");
     if (_config.api_key && strlen(_config.api_key) > 0) {
@@ -308,11 +389,7 @@ bool DeviceManager::sendCommandResponse(const char* command_id, bool success, co
     doc["success"] = success;
     if (message) doc["message"] = message;
     
-    #if defined(ESP32)
-    _http.begin(url);
-    #else
-    _http.begin(_wifiClient, url);
-    #endif
+    if (!_beginHttpUrl(url)) return false;
     
     _http.addHeader("Content-Type", "application/json");
     if (_config.api_key && strlen(_config.api_key) > 0) {
@@ -371,35 +448,71 @@ void DeviceManager::reconnect() {
 }
 
 #if INTEGRALL_NETWORK_AVAILABLE
-String DeviceManager::httpGet(const char* url) {
-    if (!url || !isWiFiConnected()) return "";
-    #if defined(ESP32)
-    _http.begin(url);
-    #else
-    _http.begin(_wifiClient, url);
-    #endif
-    
-    int code = _http.GET();
+HttpResponse DeviceManager::httpRequest(const char* method, const char* url, const char* payload, const char* contentType, const char* authToken) {
+    HttpResponse resp;
+    if (!url || !method || (!isWiFiConnected() && _state != DeviceState::CONFIGURING)) {
+        _last_status_code = -1;
+        return resp;
+    }
+
+    if (!_beginHttpUrl(url)) {
+        _last_status_code = -1;
+        return resp;
+    }
+
+    _applyCustomHeaders(authToken);
+    if (payload && strlen(payload) > 0 && contentType && strlen(contentType) > 0) {
+        _http.addHeader("Content-Type", contentType);
+    }
+
+    int code = -1;
+    if (strcmp(method, "GET") == 0) {
+        code = _http.GET();
+    } else if (strcmp(method, "POST") == 0) {
+        code = _http.POST((uint8_t*)(payload ? payload : ""), payload ? strlen(payload) : 0);
+    } else if (strcmp(method, "PUT") == 0) {
+        code = _http.PUT((uint8_t*)(payload ? payload : ""), payload ? strlen(payload) : 0);
+    } else if (strcmp(method, "PATCH") == 0) {
+        code = _http.PATCH((uint8_t*)(payload ? payload : ""), payload ? strlen(payload) : 0);
+    } else {
+        code = _http.sendRequest(method, (uint8_t*)(payload ? payload : ""), payload ? strlen(payload) : 0);
+    }
+
+    _last_status_code = code;
     _last_response = "";
-    if (code == 200) _last_response = _http.getString();
+    resp.statusCode = code;
+    resp.contentLength = _http.getSize();
+    if (code > 0) {
+        _last_response = _http.getString();
+        resp.body = _last_response;
+    }
     _http.end();
-    return _last_response;
+    return resp;
 }
 
-int DeviceManager::httpPost(const char* url, const char* payload, const char* contentType) {
-    if (!url || !payload || !isWiFiConnected()) return -1;
-    #if defined(ESP32)
-    _http.begin(url);
-    #else
-    _http.begin(_wifiClient, url);
-    #endif
-    
-    _http.addHeader("Content-Type", contentType ? contentType : "application/json");
-    int code = _http.POST((uint8_t*)payload, strlen(payload));
-    _last_response = "";
-    if (code > 0) _last_response = _http.getString();
-    _http.end();
-    return code;
+String DeviceManager::httpGet(const char* url, const char* authToken) {
+    HttpResponse r = httpRequest("GET", url, nullptr, nullptr, authToken);
+    return r.ok() ? r.body : String("");
+}
+
+int DeviceManager::httpPost(const char* url, const char* payload, const char* contentType, const char* authToken) {
+    HttpResponse r = httpRequest("POST", url, payload ? payload : "", contentType, authToken);
+    return r.statusCode;
+}
+
+int DeviceManager::httpPut(const char* url, const char* payload, const char* contentType, const char* authToken) {
+    HttpResponse r = httpRequest("PUT", url, payload ? payload : "", contentType, authToken);
+    return r.statusCode;
+}
+
+int DeviceManager::httpPatch(const char* url, const char* payload, const char* contentType, const char* authToken) {
+    HttpResponse r = httpRequest("PATCH", url, payload ? payload : "", contentType, authToken);
+    return r.statusCode;
+}
+
+int DeviceManager::httpDelete(const char* url, const char* payload, const char* authToken) {
+    HttpResponse r = httpRequest("DELETE", url, payload, "application/json", authToken);
+    return r.statusCode;
 }
 
 int DeviceManager::httpPostFile(const char* url, uint8_t* data, size_t len, const char* fileName, const char* fileKey, const char* extraKey, const char* extraVal) {
@@ -435,16 +548,17 @@ int DeviceManager::httpPostFile(const char* url, uint8_t* data, size_t len, cons
     memcpy(buffer + head.length(), data, len);
     memcpy(buffer + head.length() + len, tail.c_str(), tail.length());
 
-    #if defined(ESP32)
-    _http.begin(url);
-    #else
-    _http.begin(_wifiClient, url);
-    #endif
+    if (!_beginHttpUrl(url)) {
+        free(buffer);
+        return -1;
+    }
 
+    _applyCustomHeaders();
     _http.addHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
     int code = _http.POST(buffer, totalLen);
     free(buffer);
     
+    _last_status_code = code;
     _last_response = "";
     if (code > 0) _last_response = _http.getString();
     _http.end();
@@ -453,13 +567,11 @@ int DeviceManager::httpPostFile(const char* url, uint8_t* data, size_t len, cons
 
 Stream* DeviceManager::getStream(const char* url) {
     if (!url || !isWiFiConnected()) return nullptr;
-    #if defined(ESP32)
-    _http.begin(url);
-    #else
-    _http.begin(_wifiClient, url);
-    #endif
+    if (!_beginHttpUrl(url)) return nullptr;
     
+    _applyCustomHeaders();
     int code = _http.GET();
+    _last_status_code = code;
     if (code == 200) {
         #if defined(ESP32)
         return &_http.getStream();

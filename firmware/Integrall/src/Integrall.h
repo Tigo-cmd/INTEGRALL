@@ -135,6 +135,7 @@
 #endif
 
 #include "modules/BlinkerModule.h"
+#include "modules/WebModule.h"
 
 // ============================================================================
 // MAIN SYSTEM CLASS
@@ -1376,20 +1377,69 @@ public:
     bool sendTelemetry(const char* key, float value);
     bool sendTelemetry(const char* key, const char* value);
     
-    /**
-     * Perform an easy HTTP GET request
-     * @return Response string (empty if failed)
-     */
-    String httpGet(const char* url) { return _device_manager.httpGet(url); }
+    // ========================================================================
+    // HTTP & HTTPS REST CLIENT API (GET, POST, PUT, PATCH, DELETE, TLS, HEADERS)
+    // ========================================================================
 
     /**
-     * Perform an easy HTTP POST request 
-     * @return HTTP response code
+     * Configure custom headers, Bearer Auth, TLS Root CA, or request timeout
      */
-    int httpPost(const char* url, const char* payload) { return _device_manager.httpPost(url, payload); }
+    void setHttpHeader(const char* key, const char* value) { _device_manager.setHttpHeader(key, value); }
+    void clearHttpHeaders()                                { _device_manager.clearHttpHeaders(); }
+    void setBearerToken(const char* token)                 { _device_manager.setBearerToken(token); }
+    void setCACert(const char* rootCA)                     { _device_manager.setCACert(rootCA); }
+    void setHttpInsecure(bool insecure = true)             { _device_manager.setHttpInsecure(insecure); }
+    void setHttpTimeout(uint16_t timeoutMs)                { _device_manager.setHttpTimeout(timeoutMs); }
+
+    /**
+     * Perform a generic HTTP or HTTPS request returning a full HttpResponse struct
+     */
+    HttpResponse httpRequest(const char* method, const char* url, const char* payload = nullptr, const char* contentType = "application/json", const char* authToken = nullptr) {
+        return _device_manager.httpRequest(method, url, payload, contentType, authToken);
+    }
+
+    /**
+     * Perform an HTTP or HTTPS GET request (auto-detects http:// vs https://)
+     * @return Response string (empty if failed)
+     */
+    String httpGet(const char* url, const char* authToken = nullptr) {
+        return _device_manager.httpGet(url, authToken);
+    }
+
+    /**
+     * Perform an HTTP or HTTPS POST request
+     * @return HTTP status code (e.g. 200, 201)
+     */
+    int httpPost(const char* url, const char* payload, const char* contentType = "application/json", const char* authToken = nullptr) {
+        return _device_manager.httpPost(url, payload, contentType, authToken);
+    }
+
+    /**
+     * Perform an HTTP or HTTPS PUT request
+     * @return HTTP status code
+     */
+    int httpPut(const char* url, const char* payload, const char* contentType = "application/json", const char* authToken = nullptr) {
+        return _device_manager.httpPut(url, payload, contentType, authToken);
+    }
+
+    /**
+     * Perform an HTTP or HTTPS PATCH request
+     * @return HTTP status code
+     */
+    int httpPatch(const char* url, const char* payload, const char* contentType = "application/json", const char* authToken = nullptr) {
+        return _device_manager.httpPatch(url, payload, contentType, authToken);
+    }
+
+    /**
+     * Perform an HTTP or HTTPS DELETE request
+     * @return HTTP status code
+     */
+    int httpDelete(const char* url, const char* payload = nullptr, const char* authToken = nullptr) {
+        return _device_manager.httpDelete(url, payload, authToken);
+    }
     
     /**
-     * Post a file-like buffer as multipart form data
+     * Post a file-like buffer as multipart form data (supports HTTP & HTTPS)
      */
     int httpPostFile(const char* url, uint8_t* data, size_t len, const char* fileName, const char* fileKey = "file", const char* extraKey = nullptr, const char* extraVal = nullptr) {
         return _device_manager.httpPostFile(url, data, len, fileName, fileKey, extraKey, extraVal);
@@ -1410,11 +1460,64 @@ public:
     }
 
     /**
-     * Get the body of the last HTTP response
+     * Get the body or HTTP status code of the last HTTP/HTTPS response
      */
-    const char* getLastResponse() {
+    const char* getLastResponse() const {
         return _device_manager.getLastResponse();
     }
+
+    int getLastStatusCode() const {
+        return _device_manager.getLastStatusCode();
+    }
+    #endif
+
+    // ========================================================================
+    // C++ HTML TAG & RESPONSIVE DASHBOARD RENDERER (Available on all boards)
+    // ========================================================================
+    HtmlBuilder& html() { return _html_builder; }
+    String htmlTag(const char* tagName, const String& inner = "", const char* attrs = nullptr) { return HtmlBuilder::tag(tagName, inner, attrs); }
+    String htmlVoidTag(const char* tagName, const char* attrs = nullptr)                       { return HtmlBuilder::voidTag(tagName, attrs); }
+    String htmlCard(const String& title, const String& bodyHtml)                               { return HtmlBuilder::card(title, bodyHtml); }
+    String htmlMetric(const String& label, const String& value, const char* unit = "", const char* id = nullptr) { return HtmlBuilder::metric(label, value, unit, id); }
+    String htmlBadge(const String& text, const char* color = "cyan")                           { return HtmlBuilder::badge(text, color); }
+    String htmlButton(const String& label, const char* endpoint, const char* color = "cyan")   { return HtmlBuilder::button(label, endpoint, color); }
+    String htmlToggle(const String& label, const char* id, bool checked, const char* endpoint) { return HtmlBuilder::toggle(label, id, checked, endpoint); }
+    String htmlSlider(const String& label, const char* id, int minV, int maxV, int curV, const char* endpoint)   { return HtmlBuilder::slider(label, id, minV, maxV, curV, endpoint); }
+    String htmlProgressBar(const String& label, int percent, const char* id = nullptr)         { return HtmlBuilder::progressBar(label, percent, id); }
+    String htmlWsScript(uint16_t wsPort = 81, const char* targetId = "ws-log")                 { return HtmlBuilder::wsScript(wsPort, targetId); }
+    String htmlPage(const String& title, const String& bodyHtml, uint16_t refreshSec = 0, bool dark = true) { return HtmlBuilder::page(title, bodyHtml, refreshSec, dark); }
+
+    // ========================================================================
+    // LOCAL HTTP/REST WEB SERVER & WEBSOCKETS (ESP32 / ESP8266)
+    // ========================================================================
+    #if INTEGRALL_WEBSERVER_AVAILABLE
+    bool   webServerBegin(uint16_t port = 80)                    { return _web_module.beginServer(port); }
+    void   onGet(const char* uri, WebRouteCallback handler)      { _web_module.onGet(uri, handler); }
+    void   onPost(const char* uri, WebRouteCallback handler)     { _web_module.onPost(uri, handler); }
+    void   onPut(const char* uri, WebRouteCallback handler)      { _web_module.onPut(uri, handler); }
+    void   onPatch(const char* uri, WebRouteCallback handler)    { _web_module.onPatch(uri, handler); }
+    void   onDelete(const char* uri, WebRouteCallback handler)   { _web_module.onDelete(uri, handler); }
+    void   servePage(const char* uri, const String& html)        { _web_module.servePage(uri, html); }
+    void   serveJson(const char* uri, const String& json)        { _web_module.serveJson(uri, json); }
+    String webArg(const char* name)                              { return _web_module.arg(name); }
+    String webBody()                                             { return _web_module.body(); }
+    void   webSendHtml(const String& html, int code = 200)       { _web_module.sendHtml(html, code); }
+    void   webSendJson(const String& json, int code = 200)       { _web_module.sendJson(json, code); }
+    void   webSendText(const String& text, int code = 200)       { _web_module.sendText(text, code); }
+    void   webRedirect(const char* location, int code = 302)     { _web_module.sendRedirect(location, code); }
+    #endif
+
+    #if defined(ESP32) || defined(ESP8266)
+    bool    wsServerBegin(uint16_t port = 81)                    { return _web_module.beginWsServer(port); }
+    void    onWsMessage(WsMessageCallback cb)                    { _web_module.onWsMessage(cb); }
+    uint8_t wsBroadcast(const char* message)                     { return _web_module.wsBroadcast(message); }
+    uint8_t wsClientCount()                                      { return _web_module.wsClientCount(); }
+    bool    wsConnect(const char* url)                           { return _web_module.wsConnect(url); }
+    bool    wsConnect(const char* host, uint16_t port, const char* path = "/") { return _web_module.wsConnect(host, port, path); }
+    bool    wsSend(const char* message)                          { return _web_module.wsSend(message); }
+    void    onWsClientMessage(WsMessageCallback cb)              { _web_module.onWsClientMessage(cb); }
+    bool    wsConnected()                                        { return _web_module.wsConnected(); }
+    void    wsDisconnect()                                       { _web_module.wsDisconnect(); }
     #endif
 
     /**
@@ -1569,6 +1672,8 @@ private:
     #endif
 
     BlinkerModule _blinker;
+    WebModule     _web_module;
+    HtmlBuilder   _html_builder;
     bool _event_log_enabled = true;
 
     /**
@@ -1726,6 +1831,7 @@ void System::_handleModules() {
     #endif
 
     _blinker.handle();
+    _web_module.handle();
 }
 
 // Relay Module implementations

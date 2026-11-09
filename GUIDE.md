@@ -492,20 +492,67 @@ if (Bluetooth.available()) {
 
 ---
 
-## Networking & Utility Methods
+## Networking, HTTPS REST Client, C++ HTML Renderer & WebSockets
 
 These are available when WiFi is enabled (`#define INTEGRALL_ENABLE_WIFI`):
 
+### 1. WiFi & Device Identity
 - `integrall.isOnline()` - Check if system is fully online.
 - `integrall.isWiFiConnected()` - Check WiFi connection status.
 - `integrall.getDeviceId()` - Get unique device ID (based on MAC address).
-- `integrall.getIPAddress()` - Get assigned IP address.
+- `integrall.getIPAddress()` - Get assigned IP address (or `192.168.4.1` in Hotspot mode).
 - `integrall.getWiFiStrength()` - Get WiFi signal strength (RSSI).
 - `integrall.getStatusString()` - Get current system state as string.
 - `integrall.reconnect()` - Force reconnection.
-- `integrall.httpGet(url)` - Perform HTTP GET request.
-- `integrall.httpPost(url, payload)` - Perform HTTP POST request.
-- `integrall.enableEventLog(enabled)` - Enable/disable automatic event logging.
+
+### 2. HTTP & HTTPS REST Client (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, TLS, Auth)
+Integrall automatically detects `https://` vs `http://` URLs and configures `WiFiClientSecure` out-of-the-box:
+- `integrall.setBearerToken(token)` - Attach `Authorization: Bearer <token>` to all outgoing requests.
+- `integrall.setHttpHeader(key, value)` / `integrall.clearHttpHeaders()` - Add up to 6 custom HTTP headers.
+- `integrall.setCACert(rootCA)` / `integrall.setHttpInsecure(true)` - Pin a Root CA certificate or allow zero-config TLS.
+- `String body = integrall.httpGet(url, optionalToken)` - HTTP/HTTPS `GET` request.
+- `int code = integrall.httpPost(url, jsonPayload, contentType, optionalToken)` - HTTP/HTTPS `POST` request.
+- `int code = integrall.httpPut(url, jsonPayload, contentType, optionalToken)` - HTTP/HTTPS `PUT` request.
+- `int code = integrall.httpPatch(url, jsonPayload, contentType, optionalToken)` - HTTP/HTTPS `PATCH` request.
+- `int code = integrall.httpDelete(url, optionalPayload, optionalToken)` - HTTP/HTTPS `DELETE` request.
+- `Integrall::HttpResponse r = integrall.httpRequest(method, url, payload)` - Full response struct (`r.statusCode`, `r.body`, `r.contentLength`, `r.ok()`).
+- `integrall.getLastStatusCode()` / `integrall.getLastResponse()` - Inspect last HTTP status code and response body.
+
+### 3. C++ HTML Tag & Responsive IoT Dashboard Renderer (`HtmlBuilder`)
+Render semantic HTML5 tags and responsive dark-mode IoT dashboards in C++ without raw string concatenation:
+- `integrall.htmlTag("div", innerHtml, "class='box'")` / `integrall.htmlVoidTag("img", "src='/cam.jpg'")`
+- `integrall.htmlCard(title, bodyHtml)` - Glassmorphic container card.
+- `integrall.htmlMetric(label, value, unit, elementId)` - Live telemetry readout card (e.g., `"Temperature"`, `"25.4"`, `"°C"`, `"temp"`).
+- `integrall.htmlBadge(text, color)` - Status pill (`"cyan"`, `"green"`, `"red"`, `"amber"`).
+- `integrall.htmlButton(label, endpoint, color)` - Async `fetch(endpoint)` button (no page reload!).
+- `integrall.htmlToggle(label, id, checked, endpoint)` - Interactive ON/OFF switch calling `endpoint?state=1|0`.
+- `integrall.htmlSlider(label, id, min, max, value, endpoint)` - Interactive range slider calling `endpoint?val=X`.
+- `integrall.htmlProgressBar(label, percent, id)` - Animated `0–100%` progress bar.
+- `integrall.htmlWsScript(wsPort, targetId)` - Injects an auto-reconnecting browser WebSocket client that binds incoming JSON keys directly to DOM element IDs!
+- `integrall.htmlPage(title, bodyHtml, autoRefreshSec, darkTheme)` - Wraps content in a complete responsive HTML5 document.
+
+### 4. Local HTTP/REST Web Server (`Port 80`)
+Host local web pages and REST API endpoints directly from the ESP32/ESP8266:
+- `integrall.webServerBegin(80);`
+- `integrall.servePage("/", fullHtml);` / `integrall.serveJson("/health", "{\"ok\":true}");`
+- `integrall.onGet("/api/relay", []() { ... });` (also `onPost`, `onPut`, `onPatch`, `onDelete`)
+- Inside route handlers:
+  - `String v = integrall.webArg("state");` - Query parameter (`?state=1`) or URL-encoded form field.
+  - `String b = integrall.webBody();` - Raw request body (e.g. JSON payload).
+  - `integrall.webSendHtml(html)` / `integrall.webSendJson(json)` / `integrall.webSendText(text)` / `integrall.webRedirect(url)`
+
+### 5. Native Zero-Dependency RFC 6455 WebSockets (Server & Client)
+Real-time bidirectional messaging with zero external libraries required:
+- **WebSocket Server**:
+  - `integrall.wsServerBegin(81);`
+  - `integrall.onWsMessage([](const char* msg) { ... });`
+  - `integrall.wsBroadcast("{\"temp\":25.4}");`
+  - `integrall.wsClientCount();`
+- **WebSocket Client**:
+  - `integrall.wsConnect("ws://192.168.1.50:8080/ws");`
+  - `integrall.wsSend("{\"hello\":\"server\"}");`
+  - `integrall.onWsClientMessage([](const char* msg) { ... });`
+  - `integrall.wsConnected();` / `integrall.wsDisconnect();`
 
 ---
 

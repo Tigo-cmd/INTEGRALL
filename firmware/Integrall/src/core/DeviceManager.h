@@ -2,7 +2,8 @@
  * DeviceManager.h
  * 
  * Core device management for Integrall Framework
- * Handles WiFi connection, backend registration, and device identity
+ * Handles WiFi connection, HTTP/HTTPS REST client (GET, POST, PUT, PATCH, DELETE),
+ * TLS/SSL security, backend registration, and device identity.
  */
 
 #ifndef INTEGRALL_DEVICE_MANAGER_H
@@ -27,13 +28,21 @@
   #if defined(ESP32)
     #include <WiFi.h>
     #include <HTTPClient.h>
+    #include <WiFiClient.h>
   #else
     #include <ESP8266WiFi.h>
     #include <ESP8266HTTPClient.h>
     #include <WiFiClient.h>
   #endif
+  #if __has_include(<WiFiClientSecure.h>)
+    #include <WiFiClientSecure.h>
+    #define INTEGRALL_SECURE_AVAILABLE 1
+  #else
+    #define INTEGRALL_SECURE_AVAILABLE 0
+  #endif
 #else
   #define INTEGRALL_NETWORK_AVAILABLE 0
+  #define INTEGRALL_SECURE_AVAILABLE 0
 #endif
 
 namespace Integrall {
@@ -41,7 +50,7 @@ namespace Integrall {
 // Connection states for state machine
 enum class DeviceState {
     UNINITIALIZED,      // Just created, not configured
-    CONFIGURING,        // In config portal (WiFiManager mode)
+    CONFIGURING,        // In config portal (WiFiManager / SoftAP mode)
     DISCONNECTED,       // WiFi configured but not connected
     CONNECTING_WIFI,    // Attempting WiFi connection
     WIFI_CONNECTED,     // WiFi up, not yet registered with backend
@@ -54,7 +63,7 @@ enum class DeviceState {
 struct DeviceConfig {
     const char* wifi_ssid = nullptr;
     const char* wifi_password = nullptr;
-    const char* backend_url = nullptr;      // e.g., "http://192.168.1.100:8000"
+    const char* backend_url = nullptr;      // e.g., "http://192.168.1.100:8000" or "https://api.example.com"
     const char* api_key = nullptr;
     uint16_t backend_port = 8000;
     bool use_wifi_manager = false;          // If true, launch captive portal / AP
@@ -62,6 +71,25 @@ struct DeviceConfig {
     uint32_t reconnect_interval_ms = 5000;
     uint32_t poll_interval_ms = 3000;
 };
+
+#if INTEGRALL_NETWORK_AVAILABLE
+/**
+ * Structured HTTP/HTTPS response object
+ */
+struct HttpResponse {
+    int    statusCode = -1;
+    String body;
+    String contentType;
+    int    contentLength = 0;
+
+    bool ok() const { return statusCode >= 200 && statusCode < 300; }
+};
+
+struct HttpHeaderKV {
+    String key;
+    String value;
+};
+#endif
 
 class DeviceManager {
 public:
@@ -97,17 +125,29 @@ public:
         #endif
     }
     
-    // Backend communication
+    // Backend & HTTP/HTTPS REST Client
     #if INTEGRALL_NETWORK_AVAILABLE
     bool sendTelemetry(const JsonDocument& data);
     bool sendCommandResponse(const char* command_id, bool success, const char* message = nullptr);
     
-    // Easy HTTP API
-    String httpGet(const char* url);
-    int httpPost(const char* url, const char* payload, const char* contentType = "application/json");
+    // Custom HTTP/HTTPS Headers, Auth & TLS Configuration
+    void setHttpHeader(const char* key, const char* value);
+    void clearHttpHeaders();
+    void setBearerToken(const char* token);
+    void setCACert(const char* rootCA);
+    void setHttpInsecure(bool insecure = true);
+    void setHttpTimeout(uint16_t timeoutMs);
+
+    // Full HTTP/HTTPS Request API (Auto-detects http:// vs https://)
+    HttpResponse httpRequest(const char* method, const char* url, const char* payload = nullptr, const char* contentType = "application/json", const char* authToken = nullptr);
+    String httpGet(const char* url, const char* authToken = nullptr);
+    int httpPost(const char* url, const char* payload, const char* contentType = "application/json", const char* authToken = nullptr);
+    int httpPut(const char* url, const char* payload, const char* contentType = "application/json", const char* authToken = nullptr);
+    int httpPatch(const char* url, const char* payload, const char* contentType = "application/json", const char* authToken = nullptr);
+    int httpDelete(const char* url, const char* payload = nullptr, const char* authToken = nullptr);
     
     /**
-     * Post a file/buffer as multipart form data
+     * Post a file/buffer as multipart form data (supports both HTTP and HTTPS)
      */
     int httpPostFile(const char* url, uint8_t* data, size_t len, const char* fileName, const char* fileKey = "file", const char* extraKey = nullptr, const char* extraVal = nullptr);
 
@@ -118,7 +158,7 @@ public:
     void endStream();
     #endif
     
-    // Configuration portal (WiFiManager integration point)
+    // Configuration portal (SoftAP / Hotspot)
     bool startConfigPortal(const char* ap_name = "Integrall-Setup", 
                           const char* ap_password = nullptr);
     bool stopConfigPortal();
@@ -126,9 +166,10 @@ public:
     // Force reconnection
     void reconnect();
     
-    // Get last error or response
+    // Get last error, status code, or response body
     const char* getLastError() const { return _last_error; }
     const char* getLastResponse() const { return _last_response.c_str(); }
+    int getLastStatusCode() const { return _last_status_code; }
 
 private:
     DeviceConfig _config;
@@ -143,12 +184,23 @@ private:
     unsigned long _last_register_attempt;
     unsigned long _registration_retry_count;
     
-    // HTTP client
+    // HTTP / HTTPS client state
     #if INTEGRALL_NETWORK_AVAILABLE
     HTTPClient _http;
-      #if !defined(ESP32)
-      WiFiClient _wifiClient; // Needed for ESP8266 HTTPClient
+    WiFiClient _wifiClient;
+      #if INTEGRALL_SECURE_AVAILABLE
+      WiFiClientSecure _secureClient;
       #endif
+    static const uint8_t MAX_CUSTOM_HEADERS = 6;
+    HttpHeaderKV _custom_headers[MAX_CUSTOM_HEADERS];
+    uint8_t      _custom_header_count = 0;
+    String       _bearer_token;
+    const char*  _root_ca = nullptr;
+    bool         _tls_insecure = true;
+    uint16_t     _http_timeout_ms = 10000;
+
+    bool _beginHttpUrl(const char* url);
+    void _applyCustomHeaders(const char* authToken = nullptr);
     #endif
     
     // Internal methods
@@ -161,6 +213,7 @@ private:
     void _updateIpFromWiFi();
     
     String _last_response;
+    int    _last_status_code = 0;
 };
 
 } // namespace Integrall
