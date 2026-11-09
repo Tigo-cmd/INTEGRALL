@@ -554,6 +554,115 @@ Real-time bidirectional messaging with zero external libraries required:
   - `integrall.onWsClientMessage([](const char* msg) { ... });`
   - `integrall.wsConnected();` / `integrall.wsDisconnect();`
 
+### 6. End-to-End Sketch Walkthroughs
+
+#### Walkthrough A: Calling External HTTPS APIs (`GET`, `POST`, `PUT`, `DELETE`)
+```cpp
+#define INTEGRALL_ENABLE_WIFI
+#include <Integrall.h>
+
+Integrall::System sys;
+
+void setup() {
+    sys.begin("MyWiFi", "MyPassword");
+    sys.setBearerToken("eyJhbGciOiJIUzI1NiIs...");
+    sys.setHttpHeader("X-Device-ID", sys.getDeviceId());
+
+    // 1. HTTPS GET (auto-detects https:// and handles SSL/TLS automatically)
+    String weatherJson = sys.httpGet("https://api.open-meteo.com/v1/forecast?latitude=6.52&longitude=3.37&current_weather=true");
+    sys.println("Weather Response: %s", weatherJson.c_str());
+
+    // 2. HTTPS POST / PUT / DELETE
+    int postCode = sys.httpPost("https://my-api.com/telemetry", "{\"temp\":26.4,\"hum\":60}");
+    int putCode  = sys.httpPut("https://my-api.com/devices/node1", "{\"status\":\"active\"}");
+    int delCode  = sys.httpDelete("https://my-api.com/alerts/old");
+}
+
+void loop() {
+    sys.handle();
+}
+```
+
+#### Walkthrough B: Hosting a Live HTML Dashboard, REST API & WebSocket Stream on ESP32
+```cpp
+#define INTEGRALL_ENABLE_WIFI
+#define INTEGRALL_ENABLE_RELAY
+#define INTEGRALL_ENABLE_SENSORS
+#include <Integrall.h>
+
+Integrall::System sys;
+int pumpRelay;
+
+void setup() {
+    sys.begin("MyWiFi", "MyPassword");
+    pumpRelay = sys.enableRelay(26, true, "WaterPump");
+
+    String dashboard = sys.htmlPage("Smart Farm Hub",
+        sys.htmlTag("h1", "Smart Farm Controller ") +
+        sys.htmlBadge("LIVE", "green") +
+        sys.htmlTag("div",
+            sys.htmlMetric("Temperature", "26.5", " °C", "temp") +
+            sys.htmlMetric("Soil Moisture", "64", " %", "soil"),
+            "class='ig-grid'"
+        ) +
+        sys.htmlCard("Controls",
+            sys.htmlToggle("Water Pump", "pump_sw", false, "/api/pump") +
+            sys.htmlSlider("Pump Threshold (%)", "thresh", 0, 100, 40, "/api/threshold") +
+            sys.htmlButton("Emergency Stop", "/api/pump?state=0", "red")
+        ) +
+        sys.htmlWsScript(81)
+    );
+
+    sys.servePage("/", dashboard);
+
+    sys.onGet("/api/pump", []() {
+        int state = sys.webArg("state").toInt();
+        sys.setRelay(pumpRelay, state == 1);
+        sys.webSendJson(state ? "{\"pump\":\"ON\"}" : "{\"pump\":\"OFF\"}");
+    });
+
+    sys.wsServerBegin(81);
+    sys.println("Open in browser: http://%s/", sys.getIPAddress());
+}
+
+void loop() {
+    sys.handle();
+
+    static unsigned long lastPush = 0;
+    if (millis() - lastPush > 1000) {
+        lastPush = millis();
+        float t = sys.readThermistorC(34);
+        int soil = sys.readSoilMoisture(35);
+        String json = String("{\"temp\":\"") + String(t, 1) + "\",\"soil\":\"" + String(soil) + "\"}";
+        sys.wsBroadcast(json.c_str());
+    }
+}
+```
+
+#### Walkthrough C: Connecting ESP32 as a WebSocket Client to Node.js / Python
+```cpp
+#define INTEGRALL_ENABLE_WIFI
+#include <Integrall.h>
+
+Integrall::System sys;
+
+void setup() {
+    sys.begin("MyWiFi", "MyPassword");
+
+    sys.onWsClientMessage([](const char* msg) {
+        sys.println("Command from server: %s", msg);
+    });
+
+    if (sys.wsConnect("ws://192.168.1.100:8000/ws/device1")) {
+        sys.wsSend("{\"event\":\"device_online\"}");
+    }
+}
+
+void loop() {
+    sys.handle();
+}
+```
+
 ---
 
 ## Cloud Backend (Under Development)
