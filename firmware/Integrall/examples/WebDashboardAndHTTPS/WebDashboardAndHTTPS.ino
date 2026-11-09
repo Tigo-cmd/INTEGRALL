@@ -14,113 +14,113 @@
 #define INTEGRALL_DEBUG_LEVEL 3
 #include <Integrall.h>
 
-Integrall::System sys;
+Integrall::System integrall;
 int relayIdx = -1;
 int targetTemp = 24;
 unsigned long lastWsPush = 0;
 
 void buildAndServeDashboard() {
     // Render a complete responsive dark-mode IoT dashboard using C++ HTML tag helpers
-    String metricsRow = sys.htmlTag("div",
-        sys.htmlMetric("Temperature", "25.4", " °C", "temp") +
-        sys.htmlMetric("Humidity", "58", " %", "hum") +
-        sys.htmlMetric("WiFi Signal", String(sys.getWiFiStrength()), " dBm", "rssi"),
+    String metricsRow = integrall.htmlTag("div",
+        integrall.htmlMetric("Temperature", "25.4", " °C", "temp") +
+        integrall.htmlMetric("Humidity", "58", " %", "hum") +
+        integrall.htmlMetric("WiFi Signal", String(integrall.getWiFiStrength()), " dBm", "rssi"),
         "class=\"ig-grid\""
     );
 
-    String controlsCard = sys.htmlCard("Device Controls",
-        sys.htmlToggle("Main Power Relay", "pwr", false, "/api/relay") +
-        sys.htmlSlider("Target Setpoint (°C)", "setpoint", 16, 32, targetTemp, "/api/setpoint") +
-        sys.htmlButton("Trigger Cloud Sync", "/api/sync", "cyan") +
-        sys.htmlButton("Emergency Cutoff", "/api/relay?state=0", "red")
+    String controlsCard = integrall.htmlCard("Device Controls",
+        integrall.htmlToggle("Main Power Relay", "pwr", false, "/api/relay") +
+        integrall.htmlSlider("Target Setpoint (°C)", "setpoint", 16, 32, targetTemp, "/api/setpoint") +
+        integrall.htmlButton("Trigger Cloud Sync", "/api/sync", "cyan") +
+        integrall.htmlButton("Emergency Cutoff", "/api/relay?state=0", "red")
     );
 
-    String wsStatusCard = sys.htmlCard("Live WebSocket Stream (Port 81)",
-        sys.htmlTag("p", "Waiting for real-time telemetry...", "id=\"ws-log\"")
+    String wsStatusCard = integrall.htmlCard("Live WebSocket Stream (Port 81)",
+        integrall.htmlTag("p", "Waiting for real-time telemetry...", "id=\"ws-log\"")
     );
 
-    String fullHtml = sys.htmlPage(
+    String fullHtml = integrall.htmlPage(
         "Integrall ESP32 Web Hub",
-        sys.htmlTag("h1", "Integrall Live Control Center ") +
-        sys.htmlBadge("ONLINE", "green") +
+        integrall.htmlTag("h1", "Integrall Live Control Center ") +
+        integrall.htmlBadge("ONLINE", "green") +
         metricsRow +
         controlsCard +
         wsStatusCard +
-        sys.htmlWsScript(81, "ws-log")
+        integrall.htmlWsScript(81, "ws-log")
     );
 
-    sys.servePage("/", fullHtml);
+    integrall.servePage("/", fullHtml);
 }
 
 void setup() {
-    sys.begin("YourWiFiSSID", "YourWiFiPassword");
-    relayIdx = sys.enableRelay(26, true, "MainPower");
+    integrall.begin("YourWiFiSSID", "YourWiFiPassword");
+    relayIdx = integrall.enableRelay(26, true, "MainPower");
 
     // ------------------------------------------------------------------------
     // 1. HTTPS REST Client Example (GET / POST / PUT / DELETE)
     // ------------------------------------------------------------------------
-    if (sys.isWiFiConnected()) {
-        sys.setBearerToken("my-secret-jwt-token");
-        sys.setHttpHeader("X-Device-Name", "Integrall-Node-01");
+    if (integrall.isWiFiConnected()) {
+        integrall.setBearerToken("my-secret-jwt-token");
+        integrall.setHttpHeader("X-Device-Name", "Integrall-Node-01");
 
         // Automatic TLS/SSL when URL starts with https://
-        String getResp = sys.httpGet("https://httpbin.org/get");
-        int postCode   = sys.httpPost("https://httpbin.org/post", "{\"status\":\"booted\"}");
-        int putCode    = sys.httpPut("https://httpbin.org/put", "{\"targetTemp\":24}");
-        int delCode    = sys.httpDelete("https://httpbin.org/delete");
-        sys.println("HTTPS Codes -> POST:%d PUT:%d DELETE:%d (GET len:%d)",
-                    postCode, putCode, delCode, getResp.length());
+        String getResp = integrall.httpGet("https://httpbin.org/get");
+        int postCode   = integrall.httpPost("https://httpbin.org/post", "{\"status\":\"booted\"}");
+        int putCode    = integrall.httpPut("https://httpbin.org/put", "{\"targetTemp\":24}");
+        int delCode    = integrall.httpDelete("https://httpbin.org/delete");
+        integrall.println("HTTPS Codes -> POST:%d PUT:%d DELETE:%d (GET len:%d)",
+                          postCode, putCode, delCode, getResp.length());
     }
 
     // ------------------------------------------------------------------------
     // 2. Local HTTP/REST Web Server & HTML Dashboard (Port 80)
     // ------------------------------------------------------------------------
-    sys.webServerBegin(80);
+    integrall.webServerBegin(80);
     buildAndServeDashboard();
 
-    sys.onGet("/api/relay", []() {
-        int state = sys.webArg("state").toInt();
-        sys.setRelay(relayIdx, state == 1);
-        sys.webSendJson(String("{\"relay\":") + (state == 1 ? "true" : "false") + "}");
+    integrall.onGet("/api/relay", []() {
+        int state = integrall.webArg("state").toInt();
+        integrall.setRelay(relayIdx, state == 1);
+        integrall.webSendJson(String("{\"relay\":") + (state == 1 ? "true" : "false") + "}");
     });
 
-    sys.onGet("/api/setpoint", []() {
-        targetTemp = sys.webArg("val").toInt();
-        sys.webSendJson(String("{\"setpoint\":") + String(targetTemp) + "}");
+    integrall.onGet("/api/setpoint", []() {
+        targetTemp = integrall.webArg("val").toInt();
+        integrall.webSendJson(String("{\"setpoint\":") + String(targetTemp) + "}");
     });
 
-    sys.onPost("/api/control", []() {
-        String rawBody = sys.webBody();
-        sys.println("Received POST JSON: %s", rawBody.c_str());
-        sys.webSendJson("{\"ok\":true}");
+    integrall.onPost("/api/control", []() {
+        String rawBody = integrall.webBody();
+        integrall.println("Received POST JSON: %s", rawBody.c_str());
+        integrall.webSendJson("{\"ok\":true}");
     });
 
     // ------------------------------------------------------------------------
     // 3. Real-Time RFC 6455 WebSocket Server (Port 81)
     // ------------------------------------------------------------------------
-    sys.wsServerBegin(81);
-    sys.onWsMessage([](const char* msg) {
-        sys.println("WebSocket Message Received: %s", msg);
+    integrall.wsServerBegin(81);
+    integrall.onWsMessage([](const char* msg) {
+        integrall.println("WebSocket Message Received: %s", msg);
         if (strcmp(msg, "ping") == 0) {
-            sys.wsBroadcast("{\"ws-log\":\"pong from ESP32!\"}");
+            integrall.wsBroadcast("{\"ws-log\":\"pong from ESP32!\"}");
         }
     });
 
-    sys.println("Dashboard ready at http://%s/", sys.getIPAddress());
+    integrall.println("Dashboard ready at http://%s/", integrall.getIPAddress());
 }
 
 void loop() {
     // Non-blocking pump handles WiFi, WebServer, and WebSockets automatically
-    sys.handle();
+    integrall.handle();
 
     // Push live JSON updates to all connected WebSocket browsers every 2 seconds
     if (millis() - lastWsPush >= 2000) {
         lastWsPush = millis();
-        if (sys.wsClientCount() > 0) {
+        if (integrall.wsClientCount() > 0) {
             String liveJson = String("{\"temp\":\"") + String(24.0 + (millis() % 30) * 0.1, 1) +
                               "\",\"hum\":\"" + String(55 + (millis() % 10)) +
-                              "\",\"rssi\":\"" + String(sys.getWiFiStrength()) + "\"}";
-            sys.wsBroadcast(liveJson.c_str());
+                              "\",\"rssi\":\"" + String(integrall.getWiFiStrength()) + "\"}";
+            integrall.wsBroadcast(liveJson.c_str());
         }
     }
 }
