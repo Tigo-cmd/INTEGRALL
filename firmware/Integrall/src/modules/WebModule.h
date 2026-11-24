@@ -1,13 +1,25 @@
 /**
  * WebModule.h
  *
- * Complete Web, C++ HTML Tag & Dashboard Renderer, Native HTTP/REST WebServer
- * (GET, POST, PUT, PATCH, DELETE, CORS, Query/Form Args, JSON Body), and
- * Native Zero-Dependency RFC 6455 WebSockets (Server & Client) for Integrall.
+ * HTML dashboard renderer (HtmlBuilder), a local HTTP/REST server and RFC 6455
+ * WebSockets (server + ws:// / wss:// client) for the Integrall Framework.
  *
- * Built directly on WiFiServer/WiFiClient so it works on all ESP32 & ESP8266
- * cores without external libraries and without conflicting with esp_camera's
- * esp_http_server.h!
+ * Non-blocking by design (v1.2): every connection is a small state machine fed
+ * from handle(); a slow or malicious client can never stall loop(). Route
+ * handlers run in loop() context, so they may safely touch relays, LCD, I2C.
+ *
+ * Security defaults:
+ *  - No CORS headers unless webEnableCORS() is called.
+ *  - Cross-site request protection for handler routes: a request carrying an
+ *    Origin/Referer from another site is rejected (403). Pages built with
+ *    HtmlBuilder send "X-Integrall: 1", which other sites cannot forge.
+ *    Scripts/apps (curl, Python) without Origin are allowed.
+ *  - Optional HTTP Basic auth for everything: webSetAuth(user, pass).
+ *  - HtmlBuilder escapes text arguments (labels, titles, values).
+ *
+ * Built on WiFiServer/WiFiClient: no extra libraries, and no clash with
+ * esp_camera's esp_http_server (use different ports, e.g. camera on 80/81,
+ * WebModule on 8080).
  */
 
 #ifndef INTEGRALL_WEB_MODULE_H
@@ -17,13 +29,14 @@
 #include "../config/IntegrallConfig.h"
 #include "../core/Logger.h"
 
-#if (defined(ESP32) || defined(ESP8266))
+#if INTEGRALL_NETWORK_AVAILABLE
   #define INTEGRALL_WEBSERVER_AVAILABLE 1
   #if defined(ESP32)
     #include <WiFi.h>
   #elif defined(ESP8266)
     #include <ESP8266WiFi.h>
   #endif
+  #include <WiFiClientSecure.h>
 #else
   #define INTEGRALL_WEBSERVER_AVAILABLE 0
 #endif
@@ -36,6 +49,24 @@ namespace Integrall {
 class HtmlBuilder {
 public:
     HtmlBuilder() {}
+
+    /** Escape text for safe use inside HTML content or attribute values. */
+    static String escape(const String& in) {
+        String out;
+        out.reserve(in.length() + 8);
+        for (size_t i = 0; i < in.length(); i++) {
+            const char c = in[i];
+            switch (c) {
+                case '&':  out += F("&amp;");  break;
+                case '<':  out += F("&lt;");   break;
+                case '>':  out += F("&gt;");   break;
+                case '"':  out += F("&quot;"); break;
+                case '\'': out += F("&#39;");  break;
+                default:   out += c;
+            }
+        }
+        return out;
+    }
 
     /**
      * Render any paired HTML tag: <tag attrs>innerHtml</tag>
@@ -129,7 +160,7 @@ public:
     static String card(const String& title, const String& bodyHtml) {
         String inner = "";
         if (title.length() > 0) {
-            inner += "<div class=\"ig-card-title\">" + title + "</div>";
+            inner += "<div class=\"ig-card-title\">" + escape(title) + "</div>";
         }
         inner += "<div class=\"ig-card-body\">" + bodyHtml + "</div>";
         return tag("div", inner, "class=\"ig-card\"");
@@ -143,11 +174,11 @@ public:
         if (elementId && strlen(elementId) > 0) {
             valSpan += String(" id=\"") + elementId + "\"";
         }
-        valSpan += ">" + value + "</span>";
+        valSpan += ">" + escape(value) + "</span>";
         if (unit && strlen(unit) > 0) {
-            valSpan += String("<span class=\"ig-metric-unit\">") + unit + "</span>";
+            valSpan += String("<span class=\"ig-metric-unit\">") + escape(unit) + "</span>";
         }
-        String inner = "<div class=\"ig-metric-lbl\">" + label + "</div><div class=\"ig-metric-row\">" + valSpan + "</div>";
+        String inner = "<div class=\"ig-metric-lbl\">" + escape(label) + "</div><div class=\"ig-metric-row\">" + valSpan + "</div>";
         return tag("div", inner, "class=\"ig-card ig-metric\"");
     }
 
@@ -157,25 +188,25 @@ public:
      */
     static String badge(const String& text, const char* color = "cyan") {
         String cls = String("class=\"ig-badge ig-badge-") + (color ? color : "cyan") + "\"";
-        return tag("span", text, cls.c_str());
+        return tag("span", escape(text), cls.c_str());
     }
 
     /**
      * Render an interactive button that triggers an async fetch(endpoint) without page reload
      */
     static String button(const String& label, const char* endpoint, const char* color = "cyan") {
-        String attr = String("class=\"ig-btn ig-btn-") + (color ? color : "cyan") + "\" onclick=\"igCmd('" + (endpoint ? endpoint : "/") + "')\"";
-        return tag("button", label, attr.c_str());
+        String attr = String("class=\"ig-btn ig-btn-") + (color ? color : "cyan") + "\" onclick=\"igCmd('" + _jsAttr(endpoint ? endpoint : "/") + "')\"";
+        return tag("button", escape(label), attr.c_str());
     }
 
     /**
      * Render an interactive toggle switch that calls endpoint?state=1 or endpoint?state=0
      */
     static String toggle(const String& label, const char* id, bool checked, const char* endpoint) {
-        String html = "<div class=\"ig-ctrl-row\"><span>" + label + "</span>";
-        html += "<input type=\"checkbox\" id=\"" + String(id ? id : "sw") + "\"";
+        String html = "<div class=\"ig-ctrl-row\"><span>" + escape(label) + "</span>";
+        html += "<input type=\"checkbox\" id=\"" + escape(id ? id : "sw") + "\"";
         if (checked) html += " checked";
-        html += " onchange=\"igCmd('" + String(endpoint ? endpoint : "/toggle") + "?state='+(this.checked?1:0))\"/>";
+        html += " onchange=\"igCmd('" + _jsAttr(endpoint ? endpoint : "/toggle") + "?state='+(this.checked?1:0))\"/>";
         html += "</div>";
         return html;
     }
@@ -184,12 +215,12 @@ public:
      * Render an interactive range slider that calls endpoint?val=X
      */
     static String slider(const String& label, const char* id, int minVal, int maxVal, int curVal, const char* endpoint) {
-        String cid = id ? id : "rng";
-        String html = "<div class=\"ig-ctrl-col\"><div class=\"ig-ctrl-row\"><span>" + label + "</span>";
+        String cid = escape(id ? id : "rng");
+        String html = "<div class=\"ig-ctrl-col\"><div class=\"ig-ctrl-row\"><span>" + escape(label) + "</span>";
         html += "<strong id=\"" + cid + "_v\">" + String(curVal) + "</strong></div>";
         html += "<input type=\"range\" class=\"ig-slider\" id=\"" + cid + "\" min=\"" + String(minVal) + "\" max=\"" + String(maxVal) + "\" value=\"" + String(curVal) + "\" ";
         html += "oninput=\"document.getElementById('" + cid + "_v').innerText=this.value\" ";
-        html += "onchange=\"igCmd('" + String(endpoint ? endpoint : "/set") + "?val='+this.value)\"/></div>";
+        html += "onchange=\"igCmd('" + _jsAttr(endpoint ? endpoint : "/set") + "?val='+this.value)\"/></div>";
         return html;
     }
 
@@ -198,7 +229,7 @@ public:
      */
     static String progressBar(const String& label, int percent, const char* elementId = nullptr) {
         int pct = constrain(percent, 0, 100);
-        String html = "<div class=\"ig-ctrl-col\"><div class=\"ig-ctrl-row\"><span>" + label + "</span><span>" + String(pct) + "%</span></div>";
+        String html = "<div class=\"ig-ctrl-col\"><div class=\"ig-ctrl-row\"><span>" + escape(label) + "</span><span>" + String(pct) + "%</span></div>";
         html += "<div class=\"ig-bar-bg\"><div class=\"ig-bar-fill\"";
         if (elementId && strlen(elementId) > 0) html += String(" id=\"") + elementId + "\"";
         html += " style=\"width:" + String(pct) + "%\"></div></div></div>";
@@ -212,8 +243,8 @@ public:
      */
     static String wsScript(uint16_t wsPort = 81, const char* targetId = "ws-log") {
         String s = "<script>(function(){var ws;function conn(){ws=new WebSocket('ws://'+location.hostname+':" + String(wsPort) + "/');";
-        s += "ws.onmessage=function(e){try{var d=JSON.parse(e.data);for(var k in d){var el=document.getElementById(k);if(el)el.innerText=d[k];}}catch(_){";
-        s += "var t=document.getElementById('" + String(targetId ? targetId : "ws-log") + "');if(t)t.innerText=e.data;}};";
+        s += "ws.onmessage=function(e){try{var d=JSON.parse(e.data);for(var k in d){var el=document.getElementById(k);if(el)el.textContent=d[k];}}catch(_){";
+        s += "var t=document.getElementById('" + _jsAttr(targetId ? targetId : "ws-log") + "');if(t)t.textContent=e.data;}};";
         s += "ws.onclose=function(){setTimeout(conn,2000);};}conn();";
         s += "window.wsSend=function(m){if(ws&&ws.readyState===1)ws.send(typeof m==='object'?JSON.stringify(m):String(m));};})();</script>";
         return s;
@@ -228,7 +259,7 @@ public:
         if (autoRefreshSec > 0) {
             doc += "<meta http-equiv=\"refresh\" content=\"" + String(autoRefreshSec) + "\">";
         }
-        doc += "<title>" + title + "</title><style>";
+        doc += "<title>" + escape(title) + "</title><style>";
         if (darkTheme) {
             doc += ":root{--bg:#090b10;--card:#121621;--bdr:#22293a;--txt:#f1f5f9;--mut:#94a3b8;--acc:#00f2ff;--grn:#22c55e;--red:#ef4444;--amb:#f59e0b;}";
         } else {
@@ -254,7 +285,8 @@ public:
         doc += ".ig-bar-fill{height:100%;background:var(--acc);transition:width .25s;}";
         doc += "</style></head><body>";
         doc += bodyHtml;
-        doc += "<script>function igCmd(u){fetch(u).catch(function(e){console.error(e);});}</script></body></html>";
+        // X-Integrall marks the request as coming from this device's own page (anti-CSRF)
+        doc += "<script>function igCmd(u){fetch(u,{headers:{'X-Integrall':'1'}}).catch(function(e){console.error(e);});}</script></body></html>";
         return doc;
     }
 
@@ -279,6 +311,18 @@ public:
 
 private:
     String _buf;
+
+    /** Make a string safe inside a JS single-quoted literal inside an HTML attribute. */
+    static String _jsAttr(const char* in) {
+        String out;
+        for (const char* p = in; p && *p; p++) {
+            if (*p == '\'' || *p == '\\') { out += '\\'; out += *p; }
+            else if (*p == '"') out += F("&quot;");
+            else if (*p == '<') out += F("\\x3c");
+            else out += *p;
+        }
+        return out;
+    }
 };
 
 // ============================================================================
@@ -388,371 +432,505 @@ inline String computeWsAcceptKey(const String& clientKey) {
 } // namespace Detail
 
 // ============================================================================
-// 3. LOCAL HTTP/REST WEB SERVER + RFC 6455 WEBSOCKETS ENGINE (WebModule)
+// 3. LOCAL HTTP/REST SERVER + RFC 6455 WEBSOCKETS (non-blocking engine)
 // ============================================================================
 typedef void (*WebRouteCallback)();
 typedef void (*WsMessageCallback)(const char* message);
 
+#ifndef INTEGRALL_WEB_MAX_ROUTES
+  #define INTEGRALL_WEB_MAX_ROUTES 16
+#endif
+#ifndef INTEGRALL_WEB_MAX_CONN
+  #define INTEGRALL_WEB_MAX_CONN 2          // simultaneous HTTP requests being received
+#endif
+#ifndef INTEGRALL_WEB_MAX_BODY
+  #define INTEGRALL_WEB_MAX_BODY 2048       // larger bodies get 413
+#endif
+#ifndef INTEGRALL_WS_MAX_CLIENTS
+  #if defined(ESP8266)
+    #define INTEGRALL_WS_MAX_CLIENTS 2
+  #else
+    #define INTEGRALL_WS_MAX_CLIENTS 4
+  #endif
+#endif
+#ifndef INTEGRALL_WS_MAX_MSG
+  #define INTEGRALL_WS_MAX_MSG 1024         // larger messages close the socket with 1009
+#endif
+
+#if INTEGRALL_WEBSERVER_AVAILABLE
+namespace Detail {
+inline uint32_t random32() {
+    #if defined(ESP32)
+    return esp_random();
+    #else
+    return ESP.random();
+    #endif
+}
+
+/** Case-insensitive "Name:" header match; returns the trimmed value or "". */
+inline String headerValue(const String& headers, const char* name) {
+    const size_t n = strlen(name);
+    int from = 0;
+    while (from < (int)headers.length()) {
+        int eol = headers.indexOf('\n', from);
+        if (eol < 0) eol = headers.length();
+        if ((int)(eol - from) > (int)n && headers[from + n] == ':' &&
+            strncasecmp(headers.c_str() + from, name, n) == 0) {
+            String v = headers.substring(from + n + 1, eol);
+            v.trim();
+            return v;
+        }
+        from = eol + 1;
+    }
+    return String();
+}
+
+/** "host:port" -> "host". */
+inline String hostnameOnly(const String& hp) {
+    int c = hp.lastIndexOf(':');
+    return (c > 0 && hp.indexOf(']') < c) ? hp.substring(0, c) : hp;
+}
+
+/** Host part of "http://host:port/..." (keeps :port). */
+inline String hostOfUrl(const String& url) {
+    int s = url.indexOf("://");
+    if (s < 0) return String();
+    s += 3;
+    int e = url.indexOf('/', s);
+    return url.substring(s, e < 0 ? url.length() : e);
+}
+
+inline String urlDecode(const String& in) {
+    String out;
+    out.reserve(in.length());
+    for (size_t i = 0; i < in.length(); i++) {
+        char c = in[i];
+        if (c == '+') { out += ' '; continue; }
+        if (c == '%' && i + 2 < in.length()) {
+            char h[3] = {in[i + 1], in[i + 2], 0};
+            out += (char)strtol(h, nullptr, 16);
+            i += 2;
+            continue;
+        }
+        out += c;
+    }
+    return out;
+}
+} // namespace Detail
+#endif
+
 class WebModule {
 public:
-    WebModule()
-        : _server_running(false),
-          _ws_server_running(false),
-          _ws_client_connected(false),
-          _ws_msg_cb(nullptr),
-          _ws_client_msg_cb(nullptr) {
-        #if INTEGRALL_WEBSERVER_AVAILABLE
-        _http_server = nullptr;
-        _ws_server   = nullptr;
-        _route_count = 0;
-        _arg_count   = 0;
-        _responded   = false;
-        for (uint8_t i = 0; i < MAX_WS_CLIENTS; i++) {
-            _ws_handshake_done[i] = false;
-        }
-        #endif
-    }
-
+    WebModule() {}
     ~WebModule() {
         #if INTEGRALL_WEBSERVER_AVAILABLE
-        if (_http_server) {
-            delete _http_server;
-            _http_server = nullptr;
-        }
-        if (_ws_server) {
-            delete _ws_server;
-            _ws_server = nullptr;
-        }
+        if (_http_server) { _http_server->stop(); delete _http_server; }
+        if (_ws_server) { _ws_server->stop(); delete _ws_server; }
+        for (uint8_t i = 0; i < INTEGRALL_WS_MAX_CLIENTS; i++) delete _wsc[i];
+        delete _wsc_peer;
+        #if defined(ESP8266)
+        delete _wsc_x509;
+        #endif
         #endif
     }
 
 #if INTEGRALL_WEBSERVER_AVAILABLE
-    /**
-     * Start the local HTTP/REST Web Server on the specified port (default: 80)
-     */
+    // ======================================================================
+    // HTTP server
+    // ======================================================================
+    /** Start the HTTP server (default port 80). Idempotent. */
     bool beginServer(uint16_t port = 80) {
-        if (_server_running && _http_server) return true;
+        if (_http_server) return true;
         _http_server = new WiFiServer(port);
-        if (!_http_server) return false;
         _http_server->begin();
-        _server_running = true;
-        INTEGRALL_LOG_INFO_VAL("WebModule: HTTP Server started on port ", port);
+        #if defined(ESP8266)
+        _http_server->setNoDelay(true);
+        #endif
+        INTEGRALL_LOG_INFO_VAL("Web: HTTP server on port ", port);
         return true;
     }
 
-    /**
-     * Register GET / POST / PUT / PATCH / DELETE route handlers
-     */
-    void onGet(const char* uri, WebRouteCallback handler)    { _addRoute("GET", uri, handler, "", nullptr); }
-    void onPost(const char* uri, WebRouteCallback handler)   { _addRoute("POST", uri, handler, "", nullptr); }
-    void onPut(const char* uri, WebRouteCallback handler)    { _addRoute("PUT", uri, handler, "", nullptr); }
-    void onPatch(const char* uri, WebRouteCallback handler)  { _addRoute("PATCH", uri, handler, "", nullptr); }
-    void onDelete(const char* uri, WebRouteCallback handler) { _addRoute("DELETE", uri, handler, "", nullptr); }
+    void onGet(const char* uri, WebRouteCallback h)    { _addRoute(M_GET, uri, h, String(), nullptr); }
+    void onPost(const char* uri, WebRouteCallback h)   { _addRoute(M_POST, uri, h, String(), nullptr); }
+    void onPut(const char* uri, WebRouteCallback h)    { _addRoute(M_PUT, uri, h, String(), nullptr); }
+    void onPatch(const char* uri, WebRouteCallback h)  { _addRoute(M_PATCH, uri, h, String(), nullptr); }
+    void onDelete(const char* uri, WebRouteCallback h) { _addRoute(M_DELETE, uri, h, String(), nullptr); }
+    /** Any method. */
+    void on(const char* uri, WebRouteCallback h)       { _addRoute(M_ANY, uri, h, String(), nullptr); }
 
-    /**
-     * Serve an HTML page at a given URI in one line (e.g., servePage("/", html))
-     */
-    void servePage(const char* uri, const String& html) {
-        _addRoute("GET", uri, nullptr, html, "text/html; charset=utf-8");
+    /** Serve a fixed HTML page (read-only, always allowed). */
+    void servePage(const char* uri, const String& html) { _addRoute(M_GET, uri, nullptr, html, "text/html; charset=utf-8"); }
+    /** Serve a fixed JSON document (read-only, always allowed). */
+    void serveJson(const char* uri, const String& json) { _addRoute(M_GET, uri, nullptr, json, "application/json"); }
+
+    /** Require HTTP Basic auth for every request (nullptr to disable). */
+    void setAuth(const char* user, const char* pass) {
+        if (!user || !pass) { _auth_b64 = String(); return; }
+        String up = String(user) + ":" + pass;
+        _auth_b64 = Detail::base64Encode((const uint8_t*)up.c_str(), up.length());
     }
 
     /**
-     * Serve a static/cached JSON payload at a given URI
+     * Allow cross-origin browser access (adds CORS headers and disables the
+     * cross-site check). Pass the exact origin (e.g. "https://my.app") or "*".
      */
-    void serveJson(const char* uri, const String& json) {
-        _addRoute("GET", uri, nullptr, json, "application/json");
-    }
+    void enableCORS(const char* origin = "*") { _cors_origin = origin ? origin : ""; }
 
-    /**
-     * Read query parameter (?key=val) or form argument inside a route handler
-     */
+    /** Disable the cross-site request check (not recommended). */
+    void allowCrossSite(bool allow = true) { _allow_cross_site = allow; }
+
+    // ---- inside a route handler ---------------------------------------------
     String arg(const char* name) const {
-        if (!name) return "";
-        for (uint8_t i = 0; i < _arg_count; i++) {
-            if (_arg_keys[i].equalsIgnoreCase(name)) {
-                return _arg_vals[i];
-            }
-        }
-        return "";
+        if (!name) return String();
+        for (uint8_t i = 0; i < _arg_count; i++) if (_arg_keys[i].equalsIgnoreCase(name)) return _arg_vals[i];
+        return String();
+    }
+    bool hasArg(const char* name) const {
+        for (uint8_t i = 0; i < _arg_count; i++) if (_arg_keys[i].equalsIgnoreCase(name)) return true;
+        return false;
+    }
+    const String& body() const   { return _req_body; }
+    const String& method() const { return _req_method; }
+    const String& uri() const    { return _req_path; }
+    /** Request header (case-insensitive), "" if absent. */
+    String header(const char* name) const { return Detail::headerValue(_req_headers, name); }
+
+    void sendHtml(const String& html, int code = 200) { _respond(code, "text/html; charset=utf-8", html); }
+    void sendJson(const String& json, int code = 200) { _respond(code, "application/json", json); }
+    void sendText(const String& text, int code = 200) { _respond(code, "text/plain; charset=utf-8", text); }
+    void sendRedirect(const char* location, int code = 302) {
+        if (!_cur || !location) return;
+        _extra_header = String("Location: ") + location + "\r\n";
+        _respond(code, "text/plain", String());
     }
 
-    /**
-     * Read raw request body (e.g. JSON POST/PUT body) inside a route handler
-     */
-    const String& body() const {
-        return _req_body;
-    }
-
-    /**
-     * Send HTTP responses with automatic CORS headers
-     */
-    void sendHtml(const String& html, int statusCode = 200) {
-        _sendHttpResponse(statusCode, "text/html; charset=utf-8", html);
-    }
-
-    void sendJson(const String& json, int statusCode = 200) {
-        _sendHttpResponse(statusCode, "application/json", json);
-    }
-
-    void sendText(const String& text, int statusCode = 200) {
-        _sendHttpResponse(statusCode, "text/plain; charset=utf-8", text);
-    }
-
-    void sendRedirect(const char* location, int statusCode = 302) {
-        if (!_active_client || !_active_client.connected() || !location) return;
-        String hdr = "HTTP/1.1 " + String(statusCode) + " Found\r\n";
-        hdr += "Location: " + String(location) + "\r\n";
-        hdr += "Access-Control-Allow-Origin: *\r\n";
-        hdr += "Content-Length: 0\r\nConnection: close\r\n\r\n";
-        _active_client.print(hdr);
-        _responded = true;
-    }
-
-    // ========================================================================
-    // RFC 6455 WEBSOCKET SERVER
-    // ========================================================================
-
-    /**
-     * Start a real-time RFC 6455 WebSocket Server (default port: 81)
-     */
+    // ======================================================================
+    // WebSocket server
+    // ======================================================================
     bool beginWsServer(uint16_t port = 81) {
-        if (_ws_server_running && _ws_server) return true;
+        if (_ws_server) return true;
+        for (uint8_t i = 0; i < INTEGRALL_WS_MAX_CLIENTS; i++) if (!_wsc[i]) _wsc[i] = new WsPeer();
         _ws_server = new WiFiServer(port);
-        if (!_ws_server) return false;
         _ws_server->begin();
-        _ws_server_running = true;
-        INTEGRALL_LOG_INFO_VAL("WebModule: WebSocket Server started on port ", port);
+        INTEGRALL_LOG_INFO_VAL("Web: WebSocket server on port ", port);
         return true;
     }
+    void onWsMessage(WsMessageCallback cb) { _ws_msg_cb = cb; }
 
-    /**
-     * Register a callback invoked whenever a WebSocket client sends a text message
-     */
-    void onWsMessage(WsMessageCallback cb) {
-        _ws_msg_cb = cb;
-    }
-
-    /**
-     * Broadcast a text or JSON message to all connected WebSocket clients
-     */
+    /** Send a text frame to every connected client. @return clients reached. */
     uint8_t wsBroadcast(const char* message) {
-        if (!_ws_server_running || !message) return 0;
+        if (!message) return 0;
         uint8_t sent = 0;
-        size_t len = strlen(message);
-        for (uint8_t i = 0; i < MAX_WS_CLIENTS; i++) {
-            if (_ws_clients[i] && _ws_clients[i].connected() && _ws_handshake_done[i]) {
-                if (_sendWsFrame(_ws_clients[i], 0x01, (const uint8_t*)message, len, false)) {
-                    sent++;
-                }
-            }
+        const size_t len = strlen(message);
+        for (uint8_t i = 0; i < INTEGRALL_WS_MAX_CLIENTS; i++) {
+            if (_wsc[i] && _wsc[i]->open && _wsc[i]->client.connected() &&
+                _sendFrame(_wsc[i]->client, 0x1, (const uint8_t*)message, len, false)) sent++;
         }
         return sent;
     }
 
-    /**
-     * Return the number of currently active WebSocket clients
-     */
-    uint8_t wsClientCount() {
-        uint8_t count = 0;
-        for (uint8_t i = 0; i < MAX_WS_CLIENTS; i++) {
-            if (_ws_clients[i] && _ws_clients[i].connected() && _ws_handshake_done[i]) {
-                count++;
-            }
-        }
-        return count;
+    uint8_t wsClientCount() const {
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < INTEGRALL_WS_MAX_CLIENTS; i++) if (_wsc[i] && _wsc[i]->open) n++;
+        return n;
     }
 
-    // ========================================================================
-    // RFC 6455 WEBSOCKET CLIENT
-    // ========================================================================
-
+    // ======================================================================
+    // WebSocket client (ws:// and wss://), auto-reconnect with back-off
+    // ======================================================================
     /**
-     * Connect to a remote WebSocket server via ws://host:port/path
+     * Connect to ws://host[:port]/path or wss://host[:port]/path. The TCP/TLS
+     * connect itself is bounded (3 s); the upgrade handshake then completes
+     * in the background. Stays connected (auto-reconnects) until wsDisconnect().
      */
     bool wsConnect(const char* url) {
         if (!url) return false;
+        bool secure = false;
         const char* p = url;
-        if (strncmp(p, "ws://", 5) == 0) p += 5;
-        else if (strncmp(p, "wss://", 6) == 0) p += 6;
-
-        String hostPortPath = String(p);
-        int slashIdx = hostPortPath.indexOf('/');
-        String hostPort = (slashIdx >= 0) ? hostPortPath.substring(0, slashIdx) : hostPortPath;
-        String path     = (slashIdx >= 0) ? hostPortPath.substring(slashIdx) : "/";
-
-        uint16_t port = 80;
-        int colonIdx = hostPort.indexOf(':');
+        if (strncmp(p, "wss://", 6) == 0) { secure = true; p += 6; }
+        else if (strncmp(p, "ws://", 5) == 0) p += 5;
+        String rest(p);
+        int slash = rest.indexOf('/');
+        String hostPort = slash >= 0 ? rest.substring(0, slash) : rest;
+        String path = slash >= 0 ? rest.substring(slash) : String("/");
+        uint16_t port = secure ? 443 : 80;
+        int colon = hostPort.indexOf(':');
         String host = hostPort;
-        if (colonIdx >= 0) {
-            host = hostPort.substring(0, colonIdx);
-            port = (uint16_t)hostPort.substring(colonIdx + 1).toInt();
-        }
-        return wsConnect(host.c_str(), port, path.c_str());
+        if (colon >= 0) { host = hostPort.substring(0, colon); port = (uint16_t)hostPort.substring(colon + 1).toInt(); }
+        return _wsClientStart(host, port, path, secure);
     }
 
-    /**
-     * Connect to a remote WebSocket server by host, port, and path
-     */
     bool wsConnect(const char* host, uint16_t port, const char* path = "/") {
-        if (!host || strlen(host) == 0) return false;
-        _ws_client.stop();
-        _ws_client_connected = false;
-
-        if (!_ws_client.connect(host, port)) {
-            INTEGRALL_LOG_ERROR("WebModule: WebSocket client TCP connect failed");
-            return false;
-        }
-
-        // Send RFC 6455 Upgrade request
-        String req = String("GET ") + (path ? path : "/") + " HTTP/1.1\r\n";
-        req += String("Host: ") + host + ":" + String(port) + "\r\n";
-        req += "Upgrade: websocket\r\n";
-        req += "Connection: Upgrade\r\n";
-        req += "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
-        req += "Sec-WebSocket-Version: 13\r\n\r\n";
-        _ws_client.print(req);
-
-        unsigned long start = millis();
-        while (!_ws_client.available() && (millis() - start < 3000)) {
-            delay(10);
-        }
-        if (!_ws_client.available()) {
-            _ws_client.stop();
-            return false;
-        }
-
-        String statusLine = _ws_client.readStringUntil('\n');
-        if (statusLine.indexOf("101") < 0) {
-            _ws_client.stop();
-            return false;
-        }
-        // Drain response headers
-        while (_ws_client.connected() && _ws_client.available()) {
-            String line = _ws_client.readStringUntil('\n');
-            line.trim();
-            if (line.length() == 0) break;
-        }
-
-        _ws_client_connected = true;
-        INTEGRALL_LOG_INFO_VAL("WebModule: WebSocket client connected to ", host);
-        return true;
+        if (!host) return false;
+        return _wsClientStart(String(host), port, String(path ? path : "/"), false);
     }
 
-    /**
-     * Send a text or JSON message from the WebSocket client to the remote server
-     */
+    /** Pin a root CA for wss:// (default: encrypted but not verified). */
+    void wsSetCACert(const char* rootCA) { _wsc_ca = rootCA; }
+
     bool wsSend(const char* message) {
-        if (!_ws_client_connected || !_ws_client.connected() || !message) return false;
-        return _sendWsFrame(_ws_client, 0x01, (const uint8_t*)message, strlen(message), true);
+        if (!message || _wsc_state != WSC_OPEN) return false;
+        return _sendFrame(*_wsc_sock, 0x1, (const uint8_t*)message, strlen(message), true);
     }
-
-    /**
-     * Register a callback for incoming messages on the WebSocket client
-     */
-    void onWsClientMessage(WsMessageCallback cb) {
-        _ws_client_msg_cb = cb;
-    }
-
-    bool wsConnected() {
-        return _ws_client_connected && _ws_client.connected();
-    }
-
+    void onWsClientMessage(WsMessageCallback cb) { _wsc_msg_cb = cb; }
+    bool wsConnected() const { return _wsc_state == WSC_OPEN; }
     void wsDisconnect() {
-        if (_ws_client.connected()) {
-            _sendWsFrame(_ws_client, 0x08, nullptr, 0, true);
-            _ws_client.stop();
-        }
-        _ws_client_connected = false;
+        if (_wsc_state == WSC_OPEN) _sendFrame(*_wsc_sock, 0x8, nullptr, 0, true);
+        if (_wsc_sock) _wsc_sock->stop();
+        _wsc_state = WSC_IDLE;
+        _wsc_auto = false;
     }
 #endif // INTEGRALL_WEBSERVER_AVAILABLE
 
-    /**
-     * Non-blocking pump called automatically inside Integrall::System::handle()
-     */
+    /** Called by System::handle(). Never blocks. */
     void handle() {
         #if INTEGRALL_WEBSERVER_AVAILABLE
-        if (_server_running && _http_server) {
-            _handleHttpServer();
-        }
-        if (_ws_server_running && _ws_server) {
-            _handleWsServer();
-        }
-        if (_ws_client_connected) {
-            if (!_ws_client.connected()) {
-                _ws_client_connected = false;
-            } else if (_ws_client.available()) {
-                _readWsFrame(_ws_client, _ws_client_msg_cb, true);
-            }
-        }
+        if (_http_server) _handleHttp();
+        if (_ws_server) _handleWsServer();
+        _handleWsClient();
         #endif
     }
 
 private:
-    bool _server_running;
-    bool _ws_server_running;
-    bool _ws_client_connected;
-    WsMessageCallback _ws_msg_cb;
-    WsMessageCallback _ws_client_msg_cb;
-
 #if INTEGRALL_WEBSERVER_AVAILABLE
-    struct RouteEntry {
-        String           method;
+    enum Method : uint8_t { M_GET, M_POST, M_PUT, M_PATCH, M_DELETE, M_ANY, M_OTHER };
+
+    struct Route {
+        Method           method = M_GET;
         String           uri;
-        WebRouteCallback handler;
-        String           staticPayload;
-        const char*      staticMime;
+        WebRouteCallback handler = nullptr;
+        String           payload;
+        const char*      mime = nullptr;
     };
 
-    static const uint8_t MAX_WEB_ROUTES = 16;
-    static const uint8_t MAX_QUERY_ARGS = 8;
-    static const uint8_t MAX_WS_CLIENTS = 4;
+    enum ConnStage : uint8_t { C_FREE, C_HEAD, C_BODY };
+    struct Conn {
+        WiFiClient    client;
+        ConnStage     stage = C_FREE;
+        String        buf;
+        size_t        need = 0;          // body bytes still expected
+        unsigned long since = 0;
+    };
 
-    WiFiServer* _http_server;
-    WiFiClient  _active_client;
-    RouteEntry  _routes[MAX_WEB_ROUTES];
-    uint8_t     _route_count;
-    String      _arg_keys[MAX_QUERY_ARGS];
-    String      _arg_vals[MAX_QUERY_ARGS];
-    uint8_t     _arg_count;
-    String      _req_body;
-    bool        _responded;
+    struct WsPeer {
+        WiFiClient    client;
+        bool          used = false;
+        bool          open = false;      // handshake complete
+        String        head;              // handshake accumulation
+        uint8_t       rx[INTEGRALL_WS_MAX_MSG + 14];
+        size_t        rx_len = 0;
+        char          msg[INTEGRALL_WS_MAX_MSG + 1];
+        size_t        msg_len = 0;       // fragmented message assembly
+        unsigned long since = 0;
+    };
 
-    WiFiServer* _ws_server;
-    WiFiClient  _ws_clients[MAX_WS_CLIENTS];
-    bool        _ws_handshake_done[MAX_WS_CLIENTS];
-    WiFiClient  _ws_client;
+    // HTTP state
+    WiFiServer* _http_server = nullptr;
+    Route       _routes[INTEGRALL_WEB_MAX_ROUTES];
+    uint8_t     _route_count = 0;
+    Conn        _conn[INTEGRALL_WEB_MAX_CONN];
+    WiFiClient* _cur = nullptr;          // client of the request being handled
+    bool        _responded = false;
+    String      _req_method, _req_path, _req_headers, _req_body, _extra_header;
+    static const uint8_t MAX_ARGS = 8;
+    String      _arg_keys[MAX_ARGS], _arg_vals[MAX_ARGS];
+    uint8_t     _arg_count = 0;
+    String      _auth_b64;
+    String      _cors_origin;
+    bool        _allow_cross_site = false;
 
-    void _addRoute(const char* method, const char* uri, WebRouteCallback handler, const String& payload, const char* mime) {
+    // WebSocket server state
+    WiFiServer*       _ws_server = nullptr;
+    WsPeer*           _wsc[INTEGRALL_WS_MAX_CLIENTS] = {nullptr};   // allocated by beginWsServer()
+    WsMessageCallback _ws_msg_cb = nullptr;
+
+    // WebSocket client state
+    enum WscState : uint8_t { WSC_IDLE, WSC_HANDSHAKE, WSC_OPEN, WSC_WAIT_RETRY };
+    WscState          _wsc_state = WSC_IDLE;
+    bool              _wsc_auto = false;
+    bool              _wsc_secure = false;
+    String            _wsc_host, _wsc_path, _wsc_key;
+    uint16_t          _wsc_port = 80;
+    WiFiClient        _wsc_plain;
+    WiFiClientSecure  _wsc_tls;
+    Client*           _wsc_sock = nullptr;
+    const char*       _wsc_ca = nullptr;
+    #if defined(ESP8266)
+    BearSSL::X509List* _wsc_x509 = nullptr;
+    #endif
+    WsPeer*           _wsc_peer = nullptr;      // reuse the frame parser buffers
+    unsigned long     _wsc_since = 0;
+    uint32_t          _wsc_backoff = 2000;
+    WsMessageCallback _wsc_msg_cb = nullptr;
+
+    // ---------------------------------------------------------------- HTTP --
+    static Method _parseMethod(const String& m) {
+        if (m == "GET") return M_GET;
+        if (m == "POST") return M_POST;
+        if (m == "PUT") return M_PUT;
+        if (m == "PATCH") return M_PATCH;
+        if (m == "DELETE") return M_DELETE;
+        return M_OTHER;
+    }
+
+    void _addRoute(Method m, const char* uri, WebRouteCallback h, const String& payload, const char* mime) {
         if (!uri) return;
         if (!_http_server) beginServer(80);
-        // Update existing route if method + uri already registered
         for (uint8_t i = 0; i < _route_count; i++) {
-            if (_routes[i].method == method && _routes[i].uri == uri) {
-                _routes[i].handler       = handler;
-                _routes[i].staticPayload = payload;
-                _routes[i].staticMime    = mime;
+            if (_routes[i].method == m && _routes[i].uri == uri) {
+                _routes[i].handler = h; _routes[i].payload = payload; _routes[i].mime = mime;
                 return;
             }
         }
-        if (_route_count < MAX_WEB_ROUTES) {
-            _routes[_route_count].method        = method;
-            _routes[_route_count].uri           = uri;
-            _routes[_route_count].handler       = handler;
-            _routes[_route_count].staticPayload = payload;
-            _routes[_route_count].staticMime    = mime;
-            _route_count++;
+        if (_route_count >= INTEGRALL_WEB_MAX_ROUTES) {
+            INTEGRALL_LOG_ERROR("Web: route table full (raise INTEGRALL_WEB_MAX_ROUTES)");
+            return;
+        }
+        Route& r = _routes[_route_count++];
+        r.method = m; r.uri = uri; r.handler = h; r.payload = payload; r.mime = mime;
+    }
+
+    static WiFiClient _accept(WiFiServer* srv) {
+        #if defined(ESP32) && defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+        return srv->accept();
+        #elif defined(ESP8266)
+        return srv->accept();
+        #else
+        return srv->available();
+        #endif
+    }
+
+    void _handleHttp() {
+        // Accept new connections into free slots
+        WiFiClient incoming = _accept(_http_server);
+        if (incoming) {
+            bool placed = false;
+            for (uint8_t i = 0; i < INTEGRALL_WEB_MAX_CONN && !placed; i++) {
+                if (_conn[i].stage == C_FREE) {
+                    _conn[i].client = incoming;
+                    _conn[i].stage = C_HEAD;
+                    _conn[i].buf = String();
+                    _conn[i].buf.reserve(256);
+                    _conn[i].need = 0;
+                    _conn[i].since = millis();
+                    placed = true;
+                }
+            }
+            if (!placed) {
+                incoming.print(F("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+                incoming.stop();
+            }
+        }
+
+        const unsigned long now = millis();
+        for (uint8_t i = 0; i < INTEGRALL_WEB_MAX_CONN; i++) {
+            Conn& c = _conn[i];
+            if (c.stage == C_FREE) continue;
+            if (!c.client.connected() && !c.client.available()) { _close(c); continue; }
+            if (now - c.since > 3000) { _quick(c, 408, "Request Timeout"); continue; }
+
+            int budget = 512;                               // bounded work per loop
+            while (budget-- > 0 && c.client.available() > 0) {
+                char ch = (char)c.client.read();
+                if (c.stage == C_HEAD) {
+                    c.buf += ch;
+                    if (c.buf.length() > 2048) { _quick(c, 431, "Request Header Fields Too Large"); break; }
+                    if (c.buf.endsWith("\r\n\r\n")) {
+                        String cl = Detail::headerValue(c.buf, "Content-Length");
+                        long n = cl.length() ? cl.toInt() : 0;
+                        if (n > INTEGRALL_WEB_MAX_BODY) { _quick(c, 413, "Payload Too Large"); break; }
+                        c.need = (size_t)(n > 0 ? n : 0);
+                        c.stage = C_BODY;
+                        _req_body = String();
+                        _req_body.reserve(c.need);
+                        if (c.need == 0) break;
+                    }
+                } else {
+                    _req_body += ch;
+                    if (--c.need == 0) break;
+                }
+            }
+            if (c.stage == C_BODY && c.need == 0) _dispatch(c);
         }
     }
 
-    void _parseQueryParams(const String& query) {
+    void _dispatch(Conn& c) {
+        // Request line + headers live in c.buf
+        int eol = c.buf.indexOf("\r\n");
+        String line = c.buf.substring(0, eol);
+        _req_headers = c.buf.substring(eol + 2);
+        int sp1 = line.indexOf(' '), sp2 = line.indexOf(' ', sp1 + 1);
+        if (sp1 < 0 || sp2 < 0) { _quick(c, 400, "Bad Request"); return; }
+        _req_method = line.substring(0, sp1);
+        String full = line.substring(sp1 + 1, sp2);
+        int q = full.indexOf('?');
+        _req_path = Detail::urlDecode(q >= 0 ? full.substring(0, q) : full);
+        _arg_count = 0;
+        if (q >= 0) _parseArgs(full.substring(q + 1));
+        if (header("Content-Type").startsWith("application/x-www-form-urlencoded")) _parseArgs(_req_body);
+
+        _cur = &c.client;
+        _responded = false;
+        _extra_header = String();
+
+        if (_auth_b64.length() && header("Authorization") != String("Basic ") + _auth_b64) {
+            _extra_header = F("WWW-Authenticate: Basic realm=\"Integrall\"\r\n");
+            _respond(401, "text/plain", F("Unauthorized"));
+        } else if (_req_method == "OPTIONS") {
+            _respond(_cors_origin.length() ? 204 : 405, "text/plain", String());
+        } else {
+            const Method m = _parseMethod(_req_method);
+            Route* match = nullptr;
+            bool pathExists = false;
+            for (uint8_t i = 0; i < _route_count; i++) {
+                if (_routes[i].uri != _req_path) continue;
+                pathExists = true;
+                if (_routes[i].method == m || _routes[i].method == M_ANY) { match = &_routes[i]; break; }
+            }
+            if (!match) {
+                _respond(pathExists ? 405 : 404, "application/json",
+                         pathExists ? F("{\"error\":\"method not allowed\"}") : F("{\"error\":\"not found\"}"));
+            } else if (match->handler) {
+                if (_isCrossSite()) {
+                    INTEGRALL_LOG_WARN("Web: blocked cross-site request (send header X-Integrall: 1, or webAllowCrossSite)");
+                    _respond(403, "application/json", F("{\"error\":\"cross-site request blocked\"}"));
+                } else {
+                    match->handler();
+                    if (!_responded) _respond(200, "text/plain", F("OK"));
+                }
+            } else {
+                _respond(200, match->mime ? match->mime : "text/plain", match->payload);
+            }
+        }
+        _cur = nullptr;
+        _close(c);
+    }
+
+    /** true if a browser on another site sent this (Origin/Referer host != Host). */
+    bool _isCrossSite() const {
+        if (_allow_cross_site || _cors_origin.length()) return false;
+        if (header("X-Integrall").length()) return false;   // custom header: only same-origin JS can set it
+        const String host = header("Host");
+        const String origin = header("Origin");
+        if (origin.length()) return Detail::hostOfUrl(origin) != host;
+        const String ref = header("Referer");
+        if (ref.length()) return Detail::hostOfUrl(ref) != host;
+        return false;                                        // non-browser client (curl, app)
+    }
+
+    void _parseArgs(const String& qs) {
         int start = 0;
-        while (start < (int)query.length() && _arg_count < MAX_QUERY_ARGS) {
-            int amp = query.indexOf('&', start);
-            String pair = (amp >= 0) ? query.substring(start, amp) : query.substring(start);
+        while (start < (int)qs.length() && _arg_count < MAX_ARGS) {
+            int amp = qs.indexOf('&', start);
+            String pair = (amp >= 0) ? qs.substring(start, amp) : qs.substring(start);
             int eq = pair.indexOf('=');
             if (eq > 0) {
-                _arg_keys[_arg_count] = pair.substring(0, eq);
-                _arg_vals[_arg_count] = pair.substring(eq + 1);
+                _arg_keys[_arg_count] = Detail::urlDecode(pair.substring(0, eq));
+                _arg_vals[_arg_count] = Detail::urlDecode(pair.substring(eq + 1));
+                _arg_count++;
+            } else if (pair.length()) {
+                _arg_keys[_arg_count] = Detail::urlDecode(pair);
+                _arg_vals[_arg_count] = String();
                 _arg_count++;
             }
             if (amp < 0) break;
@@ -760,313 +938,283 @@ private:
         }
     }
 
-    void _sendHttpResponse(int statusCode, const char* contentType, const String& bodyContent) {
-        if (!_active_client || !_active_client.connected()) return;
-        const char* statusText = (statusCode == 200) ? "OK" :
-                                 (statusCode == 201) ? "Created" :
-                                 (statusCode == 204) ? "No Content" :
-                                 (statusCode == 400) ? "Bad Request" :
-                                 (statusCode == 404) ? "Not Found" : "OK";
-        String hdr = "HTTP/1.1 " + String(statusCode) + " " + statusText + "\r\n";
-        hdr += "Content-Type: " + String(contentType ? contentType : "text/plain") + "\r\n";
-        hdr += "Access-Control-Allow-Origin: *\r\n";
-        hdr += "Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\n";
-        hdr += "Access-Control-Allow-Headers: *\r\n";
-        hdr += "Content-Length: " + String(bodyContent.length()) + "\r\n";
-        hdr += "Connection: close\r\n\r\n";
-        _active_client.print(hdr);
-        if (bodyContent.length() > 0) {
-            _active_client.print(bodyContent);
+    static const char* _reason(int code) {
+        switch (code) {
+            case 200: return "OK";             case 201: return "Created";
+            case 204: return "No Content";     case 301: return "Moved Permanently";
+            case 302: return "Found";          case 400: return "Bad Request";
+            case 401: return "Unauthorized";   case 403: return "Forbidden";
+            case 404: return "Not Found";      case 405: return "Method Not Allowed";
+            case 408: return "Request Timeout";case 413: return "Payload Too Large";
+            case 431: return "Request Header Fields Too Large";
+            case 500: return "Internal Server Error"; case 503: return "Service Unavailable";
+            default:  return "OK";
         }
+    }
+
+    void _respond(int code, const char* type, const String& content) {
+        if (!_cur || _responded) return;
+        String h;
+        h.reserve(160);
+        h += "HTTP/1.1 "; h += code; h += ' '; h += _reason(code); h += "\r\n";
+        h += "Content-Type: "; h += type ? type : "text/plain"; h += "\r\n";
+        h += "Content-Length: "; h += content.length(); h += "\r\n";
+        h += "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n";
+        if (_cors_origin.length()) {
+            h += "Access-Control-Allow-Origin: "; h += _cors_origin; h += "\r\n";
+            h += "Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS\r\n";
+            h += "Access-Control-Allow-Headers: Content-Type, Authorization, X-Integrall\r\n";
+        }
+        h += _extra_header;
+        h += "Connection: close\r\n\r\n";
+        _cur->print(h);
+        if (content.length()) _cur->print(content);
         _responded = true;
     }
 
-    void _handleHttpServer() {
-        #if defined(ESP32) && defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-        WiFiClient client = _http_server->accept();
-        #else
-        WiFiClient client = _http_server->available();
-        #endif
-        if (!client) return;
-
-        unsigned long start = millis();
-        while (client.connected() && !client.available() && (millis() - start < 250)) {
-            delay(1);
-        }
-        if (!client.available()) {
-            client.stop();
-            return;
-        }
-
-        // Parse request line: METHOD /uri?query HTTP/1.1
-        String reqLine = client.readStringUntil('\n');
-        reqLine.trim();
-        int sp1 = reqLine.indexOf(' ');
-        int sp2 = reqLine.indexOf(' ', sp1 + 1);
-        if (sp1 < 0 || sp2 < 0) {
-            client.stop();
-            return;
-        }
-        String method  = reqLine.substring(0, sp1);
-        String fullUri = reqLine.substring(sp1 + 1, sp2);
-        String path    = fullUri;
-
-        _arg_count = 0;
-        _req_body  = "";
-        int qIdx = fullUri.indexOf('?');
-        if (qIdx >= 0) {
-            path = fullUri.substring(0, qIdx);
-            _parseQueryParams(fullUri.substring(qIdx + 1));
-        }
-
-        // Parse HTTP headers
-        int contentLen = 0;
-        bool isFormEncoded = false;
-        while (client.connected()) {
-            String hLine = client.readStringUntil('\n');
-            hLine.trim();
-            if (hLine.length() == 0) break;
-            if (hLine.startsWith("Content-Length:") || hLine.startsWith("content-length:")) {
-                contentLen = hLine.substring(15).toInt();
-            } else if (hLine.indexOf("application/x-www-form-urlencoded") >= 0) {
-                isFormEncoded = true;
-            }
-        }
-
-        // Read request body if present
-        if (contentLen > 0) {
-            if (contentLen > 2048) contentLen = 2048;
-            _req_body.reserve(contentLen);
-            unsigned long bStart = millis();
-            while ((int)_req_body.length() < contentLen && (millis() - bStart < 500)) {
-                if (client.available()) {
-                    _req_body += (char)client.read();
-                } else {
-                    delay(1);
-                }
-            }
-            if (isFormEncoded) {
-                _parseQueryParams(_req_body);
-            }
-        }
-
-        _active_client = client;
-        _responded = false;
-
-        // Handle CORS Preflight
-        if (method == "OPTIONS") {
-            _sendHttpResponse(204, "text/plain", "");
-            _active_client.stop();
-            return;
-        }
-
-        // Match route
-        bool matched = false;
-        for (uint8_t i = 0; i < _route_count; i++) {
-            if (_routes[i].uri == path && (_routes[i].method == method || _routes[i].method == "ANY")) {
-                matched = true;
-                if (_routes[i].handler) {
-                    _routes[i].handler();
-                } else if (_routes[i].staticMime) {
-                    _sendHttpResponse(200, _routes[i].staticMime, _routes[i].staticPayload);
-                }
-                break;
-            }
-        }
-
-        if (!matched) {
-            _sendHttpResponse(404, "application/json", "{\"error\":\"Not Found\"}");
-        } else if (!_responded) {
-            _sendHttpResponse(200, "text/plain", "OK");
-        }
-
-        _active_client.stop();
+    void _quick(Conn& c, int code, const char* text) {
+        c.client.print(String("HTTP/1.1 ") + code + " " + text + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        _close(c);
     }
 
+    void _close(Conn& c) {
+        c.client.stop();
+        c.stage = C_FREE;
+        c.buf = String();
+    }
+
+    // ----------------------------------------------------------- WS server --
     void _handleWsServer() {
-        #if defined(ESP32) && defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-        WiFiClient incoming = _ws_server->accept();
+        WiFiClient incoming = _accept(_ws_server);
         if (incoming) {
-            bool accepted = false;
-            for (uint8_t i = 0; i < MAX_WS_CLIENTS; i++) {
-                if (!_ws_clients[i] || !_ws_clients[i].connected()) {
-                    _ws_clients[i] = incoming;
-                    _ws_handshake_done[i] = false;
-                    accepted = true;
-                    break;
-                }
-            }
-            if (!accepted) {
+            WsPeer* slot = nullptr;
+            for (uint8_t i = 0; i < INTEGRALL_WS_MAX_CLIENTS && !slot; i++) if (_wsc[i] && !_wsc[i]->used) slot = _wsc[i];
+            if (!slot) {
+                incoming.print(F("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n"));
                 incoming.stop();
+            } else {
+                slot->client = incoming; slot->used = true; slot->open = false;
+                slot->head = String(); slot->rx_len = 0; slot->msg_len = 0; slot->since = millis();
             }
         }
-        #else
-        if (_ws_server->hasClient()) {
-            bool accepted = false;
-            for (uint8_t i = 0; i < MAX_WS_CLIENTS; i++) {
-                if (!_ws_clients[i] || !_ws_clients[i].connected()) {
-                    _ws_clients[i] = _ws_server->available();
-                    _ws_handshake_done[i] = false;
-                    accepted = true;
-                    break;
+        for (uint8_t i = 0; i < INTEGRALL_WS_MAX_CLIENTS; i++) {
+            if (!_wsc[i] || !_wsc[i]->used) continue;
+            WsPeer& p = *_wsc[i];
+            if (!p.client.connected() && !p.client.available()) { _wsDrop(p); continue; }
+            if (!p.open) {
+                if (millis() - p.since > 3000) { _wsDrop(p); continue; }
+                int budget = 512;
+                while (budget-- > 0 && p.client.available() > 0) {
+                    p.head += (char)p.client.read();
+                    if (p.head.length() > 2048) { _wsDrop(p); break; }
+                    if (p.head.endsWith("\r\n\r\n")) { _wsServerHandshake(p); break; }
                 }
-            }
-            if (!accepted) {
-                WiFiClient rejectClient = _ws_server->available();
-                rejectClient.stop();
-            }
-        }
-        #endif
-
-        for (uint8_t i = 0; i < MAX_WS_CLIENTS; i++) {
-            if (_ws_clients[i] && _ws_clients[i].connected()) {
-                if (!_ws_handshake_done[i]) {
-                    if (_ws_clients[i].available()) {
-                        _performServerHandshake(i);
-                    }
-                } else if (_ws_clients[i].available()) {
-                    if (!_readWsFrame(_ws_clients[i], _ws_msg_cb, false)) {
-                        _ws_clients[i].stop();
-                        _ws_handshake_done[i] = false;
-                    }
-                }
-            } else if (_ws_handshake_done[i]) {
-                _ws_handshake_done[i] = false;
+            } else if (!_pumpFrames(p, p.client, false, _ws_msg_cb)) {
+                _wsDrop(p);
             }
         }
     }
 
-    void _performServerHandshake(uint8_t idx) {
-        WiFiClient& client = _ws_clients[idx];
-        String wsKey = "";
-        unsigned long timeout = millis();
-        while (client.connected() && (millis() - timeout < 1000)) {
-            if (!client.available()) {
-                delay(1);
-                continue;
-            }
-            String line = client.readStringUntil('\n');
-            line.trim();
-            if (line.length() == 0) break;
-            if (line.startsWith("Sec-WebSocket-Key:") || line.startsWith("sec-websocket-key:")) {
-                wsKey = line.substring(18);
-                wsKey.trim();
-            }
-        }
-        if (wsKey.length() == 0) {
-            client.stop();
+    void _wsServerHandshake(WsPeer& p) {
+        String key = Detail::headerValue(p.head, "Sec-WebSocket-Key");
+        String upgrade = Detail::headerValue(p.head, "Upgrade");
+        String origin = Detail::headerValue(p.head, "Origin");
+        String host = Detail::headerValue(p.head, "Host");
+        // Page is usually on :80 and the socket on :81, so compare hostnames only.
+        const bool crossSite = origin.length() && !_allow_cross_site && !_cors_origin.length() &&
+                               Detail::hostnameOnly(Detail::hostOfUrl(origin)) != Detail::hostnameOnly(host);
+        if (!key.length() || !upgrade.equalsIgnoreCase("websocket") || crossSite) {
+            p.client.print(crossSite ? F("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                                     : F("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"));
+            _wsDrop(p);
             return;
         }
-        String acceptKey = Detail::computeWsAcceptKey(wsKey);
-        String resp = "HTTP/1.1 101 Switching Protocols\r\n";
-        resp += "Upgrade: websocket\r\n";
-        resp += "Connection: Upgrade\r\n";
-        resp += "Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
-        client.print(resp);
-        _ws_handshake_done[idx] = true;
+        String resp = F("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ");
+        resp += Detail::computeWsAcceptKey(key);
+        resp += "\r\n\r\n";
+        p.client.print(resp);
+        p.open = true;
+        p.head = String();
     }
 
-    bool _sendWsFrame(WiFiClient& client, uint8_t opcode, const uint8_t* payload, size_t len, bool maskFrame) {
-        if (!client.connected()) return false;
-        uint8_t hdr[14];
-        size_t hdrLen = 0;
-        hdr[0] = 0x80 | (opcode & 0x0F); // FIN + opcode
+    void _wsDrop(WsPeer& p) {
+        p.client.stop();
+        p.used = false; p.open = false;
+        p.head = String(); p.rx_len = 0; p.msg_len = 0;
+    }
 
-        uint8_t maskBit = maskFrame ? 0x80 : 0x00;
-        if (len <= 125) {
-            hdr[1] = maskBit | (uint8_t)len;
-            hdrLen = 2;
-        } else if (len <= 65535) {
-            hdr[1] = maskBit | 126;
-            hdr[2] = (uint8_t)((len >> 8) & 0xFF);
-            hdr[3] = (uint8_t)(len & 0xFF);
-            hdrLen = 4;
+    /**
+     * Read available bytes into the peer buffer and process every complete
+     * frame. Returns false if the connection must be closed.
+     * isClient: we are the client side (our frames masked, theirs not).
+     */
+    bool _pumpFrames(WsPeer& p, Client& sock, bool isClient, WsMessageCallback cb) {
+        int budget = 512;
+        while (budget-- > 0 && sock.available() > 0 && p.rx_len < sizeof(p.rx)) {
+            p.rx[p.rx_len++] = (uint8_t)sock.read();
+        }
+        for (;;) {
+            if (p.rx_len < 2) return true;
+            const uint8_t b0 = p.rx[0], b1 = p.rx[1];
+            const bool fin = b0 & 0x80;
+            const uint8_t op = b0 & 0x0F;
+            const bool masked = b1 & 0x80;
+            if (!isClient && !masked) { _wsClose(sock, 1002, isClient); return false; }   // RFC: client frames must be masked
+            size_t len = b1 & 0x7F, hdr = 2;
+            if (len == 126) {
+                if (p.rx_len < 4) return true;
+                len = ((size_t)p.rx[2] << 8) | p.rx[3]; hdr = 4;
+            } else if (len == 127) {
+                _wsClose(sock, 1009, isClient); return false;                           // > 64 KB: never on an MCU
+            }
+            if (masked) hdr += 4;
+            if (len > INTEGRALL_WS_MAX_MSG) { _wsClose(sock, 1009, isClient); return false; }
+            if (p.rx_len < hdr + len) return true;                                      // wait for the rest
+            uint8_t* payload = p.rx + hdr;
+            if (masked) { const uint8_t* mk = p.rx + hdr - 4; for (size_t i = 0; i < len; i++) payload[i] ^= mk[i & 3]; }
+
+            if (op == 0x8) { _wsClose(sock, 1000, isClient); return false; }
+            if (op == 0x9) { _sendFrame(sock, 0xA, payload, len, isClient); }
+            else if (op == 0x1 || op == 0x2 || op == 0x0) {
+                if (op != 0x0) p.msg_len = 0;
+                if (p.msg_len + len > INTEGRALL_WS_MAX_MSG) { _wsClose(sock, 1009, isClient); return false; }
+                memcpy(p.msg + p.msg_len, payload, len);
+                p.msg_len += len;
+                if (fin) {
+                    p.msg[p.msg_len] = '\0';
+                    if (cb) cb(p.msg);
+                    p.msg_len = 0;
+                }
+            }
+            // consume this frame
+            const size_t used = hdr + len;
+            memmove(p.rx, p.rx + used, p.rx_len - used);
+            p.rx_len -= used;
+        }
+    }
+
+    bool _sendFrame(Client& sock, uint8_t op, const uint8_t* data, size_t len, bool mask) {
+        if (!sock.connected() || len > 65535) return false;
+        uint8_t h[14]; size_t n = 0;
+        h[n++] = 0x80 | (op & 0x0F);
+        const uint8_t mbit = mask ? 0x80 : 0x00;
+        if (len <= 125) h[n++] = mbit | (uint8_t)len;
+        else { h[n++] = mbit | 126; h[n++] = (uint8_t)(len >> 8); h[n++] = (uint8_t)len; }
+        uint8_t mk[4] = {0, 0, 0, 0};
+        if (mask) {
+            uint32_t r = Detail::random32();                 // RFC 6455: fresh random key per frame
+            memcpy(mk, &r, 4);
+            memcpy(h + n, mk, 4); n += 4;
+        }
+        sock.write(h, n);
+        if (!len) return true;
+        if (!mask) { sock.write(data, len); return true; }
+        uint8_t chunk[64];
+        for (size_t off = 0; off < len; off += sizeof(chunk)) {
+            size_t k = (len - off < sizeof(chunk)) ? len - off : sizeof(chunk);
+            for (size_t j = 0; j < k; j++) chunk[j] = data[off + j] ^ mk[(off + j) & 3];
+            sock.write(chunk, k);
+        }
+        return true;
+    }
+
+    void _wsClose(Client& sock, uint16_t code, bool mask) {
+        uint8_t c[2] = {(uint8_t)(code >> 8), (uint8_t)code};
+        _sendFrame(sock, 0x8, c, 2, mask);
+    }
+
+    // ----------------------------------------------------------- WS client --
+    bool _wsClientStart(const String& host, uint16_t port, const String& path, bool secure) {
+        _wsc_host = host; _wsc_port = port; _wsc_path = path; _wsc_secure = secure;
+        _wsc_auto = true;
+        _wsc_backoff = 2000;
+        return _wsClientOpen();
+    }
+
+    bool _wsClientOpen() {
+        if (!_wsc_peer) { _wsc_peer = new WsPeer(); }
+        _wsc_peer->rx_len = 0; _wsc_peer->msg_len = 0; _wsc_peer->head = String();
+        if (_wsc_secure) {
+            #if defined(ESP8266)
+            if (_wsc_ca) {
+                delete _wsc_x509;
+                _wsc_x509 = new BearSSL::X509List(_wsc_ca);
+                _wsc_tls.setTrustAnchors(_wsc_x509);
+            } else {
+                _wsc_tls.setInsecure();
+            }
+            #else
+            if (_wsc_ca) _wsc_tls.setCACert(_wsc_ca); else _wsc_tls.setInsecure();
+            #endif
+            _wsc_sock = &_wsc_tls;
         } else {
+            _wsc_sock = &_wsc_plain;
+        }
+        _wsc_sock->stop();
+        #if defined(ESP32)
+        bool ok = (_wsc_secure ? _wsc_tls.connect(_wsc_host.c_str(), _wsc_port, 3000)
+                               : _wsc_plain.connect(_wsc_host.c_str(), _wsc_port, 3000));
+        #else
+        _wsc_plain.setTimeout(3000); _wsc_tls.setTimeout(3000);
+        bool ok = _wsc_sock->connect(_wsc_host.c_str(), _wsc_port);
+        #endif
+        if (!ok) {
+            INTEGRALL_LOG_WARN_VAL("WS client: connect failed to ", _wsc_host);
+            _wsc_state = WSC_WAIT_RETRY; _wsc_since = millis();
             return false;
         }
-
-        uint8_t maskKey[4] = { 0x37, 0xFA, 0x21, 0x3D };
-        if (maskFrame) {
-            hdr[hdrLen++] = maskKey[0];
-            hdr[hdrLen++] = maskKey[1];
-            hdr[hdrLen++] = maskKey[2];
-            hdr[hdrLen++] = maskKey[3];
-        }
-
-        client.write(hdr, hdrLen);
-        if (payload && len > 0) {
-            if (!maskFrame) {
-                client.write(payload, len);
-            } else {
-                uint8_t chunk[64];
-                for (size_t offset = 0; offset < len; offset += sizeof(chunk)) {
-                    size_t n = (len - offset < sizeof(chunk)) ? (len - offset) : sizeof(chunk);
-                    for (size_t j = 0; j < n; j++) {
-                        chunk[j] = payload[offset + j] ^ maskKey[(offset + j) & 3];
-                    }
-                    client.write(chunk, n);
-                }
-            }
-        }
+        uint8_t nonce[16];
+        for (uint8_t i = 0; i < 16; i += 4) { uint32_t r = Detail::random32(); memcpy(nonce + i, &r, 4); }
+        _wsc_key = Detail::base64Encode(nonce, 16);
+        String req = String("GET ") + _wsc_path + " HTTP/1.1\r\nHost: " + _wsc_host + ":" + _wsc_port +
+                     "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: " + _wsc_key +
+                     "\r\nSec-WebSocket-Version: 13\r\n\r\n";
+        _wsc_sock->print(req);
+        _wsc_state = WSC_HANDSHAKE;
+        _wsc_since = millis();
         return true;
     }
 
-    bool _readWsFrame(WiFiClient& client, WsMessageCallback cb, bool isClientSide) {
-        if (client.available() < 2) return true;
-        int b0 = client.read();
-        int b1 = client.read();
-        if (b0 < 0 || b1 < 0) return false;
-
-        uint8_t opcode = (uint8_t)(b0 & 0x0F);
-        bool masked = (b1 & 0x80) != 0;
-        size_t payloadLen = (size_t)(b1 & 0x7F);
-
-        if (payloadLen == 126) {
-            unsigned long t = millis();
-            while (client.available() < 2 && (millis() - t < 200)) delay(1);
-            if (client.available() < 2) return false;
-            payloadLen = ((size_t)client.read() << 8) | (size_t)client.read();
-        } else if (payloadLen == 127) {
-            return false; // Oversized frame not supported on MCU RAM
-        }
-
-        uint8_t maskKey[4] = {0, 0, 0, 0};
-        if (masked) {
-            unsigned long t = millis();
-            while (client.available() < 4 && (millis() - t < 200)) delay(1);
-            if (client.available() < 4) return false;
-            for (int i = 0; i < 4; i++) maskKey[i] = (uint8_t)client.read();
-        }
-
-        if (opcode == 0x08) {
-            return false; // Connection Close frame
-        }
-
-        if (payloadLen > 1024) payloadLen = 1024;
-        char buf[1025];
-        size_t readCount = 0;
-        unsigned long start = millis();
-        while (readCount < payloadLen && (millis() - start < 500)) {
-            if (client.available()) {
-                uint8_t byteVal = (uint8_t)client.read();
-                if (masked) byteVal ^= maskKey[readCount & 3];
-                buf[readCount++] = (char)byteVal;
-            } else {
-                delay(1);
+    void _handleWsClient() {
+        if (_wsc_state == WSC_IDLE || !_wsc_sock) return;
+        const unsigned long now = millis();
+        if (_wsc_state == WSC_WAIT_RETRY) {
+            if (_wsc_auto && now - _wsc_since >= _wsc_backoff) {
+                _wsc_backoff = _wsc_backoff >= 30000 ? 60000 : _wsc_backoff * 2;
+                _wsClientOpen();
             }
+            return;
         }
-        buf[readCount] = '\0';
-
-        if (opcode == 0x09) {
-            // Ping -> auto reply with Pong (0x0A)
-            _sendWsFrame(client, 0x0A, (const uint8_t*)buf, readCount, isClientSide);
-            return true;
+        if (!_wsc_sock->connected() && !_wsc_sock->available()) {
+            INTEGRALL_LOG_WARN("WS client: connection lost");
+            _wsc_state = WSC_WAIT_RETRY; _wsc_since = now;
+            return;
         }
-
-        if ((opcode == 0x01 || opcode == 0x02) && cb) {
-            cb(buf);
+        if (_wsc_state == WSC_HANDSHAKE) {
+            if (now - _wsc_since > 5000) { _wsc_sock->stop(); _wsc_state = WSC_WAIT_RETRY; _wsc_since = now; return; }
+            int budget = 512;
+            while (budget-- > 0 && _wsc_sock->available() > 0) {
+                _wsc_peer->head += (char)_wsc_sock->read();
+                if (!_wsc_peer->head.endsWith("\r\n\r\n")) continue;
+                const String& h = _wsc_peer->head;
+                String accept = Detail::headerValue(h.substring(h.indexOf("\r\n") + 2), "Sec-WebSocket-Accept");
+                if (h.startsWith("HTTP/1.1 101") && accept == Detail::computeWsAcceptKey(_wsc_key)) {
+                    _wsc_state = WSC_OPEN;
+                    _wsc_backoff = 2000;
+                    INTEGRALL_LOG_INFO_VAL("WS client: connected to ", _wsc_host);
+                } else {
+                    INTEGRALL_LOG_ERROR("WS client: handshake rejected");
+                    _wsc_sock->stop(); _wsc_state = WSC_WAIT_RETRY; _wsc_since = now;
+                }
+                _wsc_peer->head = String();
+                break;
+            }
+            return;
         }
-        return true;
+        if (!_pumpFrames(*_wsc_peer, *_wsc_sock, true, _wsc_msg_cb)) {
+            _wsc_sock->stop();
+            _wsc_state = WSC_WAIT_RETRY; _wsc_since = now;
+        }
     }
 #endif // INTEGRALL_WEBSERVER_AVAILABLE
 };

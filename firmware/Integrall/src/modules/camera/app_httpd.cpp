@@ -122,7 +122,7 @@ static esp_err_t bmp_handler(httpd_req_t *req) {
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
   char ts[32];
-  snprintf(ts, 32, "%lld.%06ld", fb->timestamp.tv_sec, fb->timestamp.tv_usec);
+  snprintf(ts, 32, "%lld.%06ld", (long long)fb->timestamp.tv_sec, (long)fb->timestamp.tv_usec);
   httpd_resp_set_hdr(req, "X-Timestamp", (const char *)ts);
 
   uint8_t *buf = NULL;
@@ -182,7 +182,7 @@ static esp_err_t capture_handler(httpd_req_t *req) {
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
   char ts[32];
-  snprintf(ts, 32, "%lld.%06ld", fb->timestamp.tv_sec, fb->timestamp.tv_usec);
+  snprintf(ts, 32, "%lld.%06ld", (long long)fb->timestamp.tv_sec, (long)fb->timestamp.tv_usec);
   httpd_resp_set_hdr(req, "X-Timestamp", (const char *)ts);
 
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO

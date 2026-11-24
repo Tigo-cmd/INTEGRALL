@@ -1,0 +1,69 @@
+# Integrall cloud: Postgres + Mosquitto (MQTT) + FastAPI backend.
+# The UI is OpenRemote (separate stack, see openremote/README.md); the backend
+# mirrors every device into it when OR_* variables are set in .env.
+#   cp .env.example .env   # then change every secret
+#   docker compose up -d --build
+# API docs: http://localhost:8000/docs   MQTT: 1883
+# Old React dashboard (retired, kept for reference): docker compose --profile legacy-dashboard up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: integrall
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: integrall
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U integrall"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    entrypoint: ["/bin/sh", "/mosquitto/config/entrypoint.sh"]
+    environment:
+      MQTT_ADMIN_USER: ${MQTT_ADMIN_USER:?set in .env}
+      MQTT_ADMIN_PASSWORD: ${MQTT_ADMIN_PASSWORD:?set in .env}
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/entrypoint.sh:/mosquitto/config/entrypoint.sh:ro
+      - mqttdata:/mosquitto/data
+    ports: ["1883:1883"]
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      INTEGRALL_DATABASE_URL: postgresql+asyncpg://integrall:${POSTGRES_PASSWORD}@postgres:5432/integrall
+      INTEGRALL_JWT_SECRET: ${JWT_SECRET:?set in .env}
+      INTEGRALL_MQTT_HOST: mosquitto
+      INTEGRALL_MQTT_USERNAME: ${MQTT_ADMIN_USER}
+      INTEGRALL_MQTT_PASSWORD: ${MQTT_ADMIN_PASSWORD}
+      INTEGRALL_CORS_ORIGINS: ${DASHBOARD_ORIGIN:-http://localhost:8080}
+      # OpenRemote mirror (empty OR_URL = off)
+      INTEGRALL_OR_URL: ${OR_URL:-}
+      INTEGRALL_OR_REALM: ${OR_REALM:-master}
+      INTEGRALL_OR_CLIENT_ID: ${OR_CLIENT_ID:-}
+      INTEGRALL_OR_CLIENT_SECRET: ${OR_CLIENT_SECRET:-}
+      INTEGRALL_OR_MQTT_HOST: ${OR_MQTT_HOST:-}
+      INTEGRALL_OR_MQTT_PORT: ${OR_MQTT_PORT:-8883}
+      INTEGRALL_OR_VERIFY_TLS: ${OR_VERIFY_TLS:-true}
+      INTEGRALL_OR_PARENT_ID: ${OR_PARENT_ID:-}
+    extra_hosts: ["host.docker.internal:host-gateway"]   # reach an OpenRemote stack on this host
+    depends_on:
+      postgres: {condition: service_healthy}
+      mosquitto: {condition: service_started}
+    ports: ["8000:8000"]
+    restart: unless-stopped
+
+  dashboard:
+    profiles: [legacy-dashboard]
+    build: ./dashboard
+    depends_on: [backend]
+    ports: ["8080:80"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  mqttdata:

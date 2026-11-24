@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "author": "Integrall",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-lcd1602", "id": "lcd", "top": -140, "left": 120, "attrs": { "pins": "i2c" } },
+    { "type": "wokwi-membrane-keypad", "id": "kp", "top": 120, "left": 200, "attrs": {} },
+    { "type": "wokwi-relay-module", "id": "relay", "top": 180, "left": -160, "attrs": {} },
+    { "type": "wokwi-led", "id": "lock", "top": 160, "left": -240, "attrs": { "color": "green", "label": "DOOR" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ], [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "lcd:SDA", "esp:21", "green", [] ], [ "lcd:SCL", "esp:22", "blue", [] ], [ "lcd:VCC", "esp:5V", "red", [] ], [ "lcd:GND", "esp:GND.1", "black", [] ],
+    [ "kp:R1", "esp:19", "green", [] ], [ "kp:R2", "esp:18", "green", [] ], [ "kp:R3", "esp:5", "green", [] ], [ "kp:R4", "esp:17", "green", [] ],
+    [ "kp:C1", "esp:16", "blue", [] ], [ "kp:C2", "esp:4", "blue", [] ], [ "kp:C3", "esp:2", "blue", [] ], [ "kp:C4", "esp:15", "blue", [] ],
+    [ "relay:IN", "esp:13", "orange", [] ], [ "relay:VCC", "esp:5V", "red", [] ], [ "relay:GND", "esp:GND.2", "black", [] ],
+    [ "relay:COM", "esp:3V3", "red", [] ], [ "relay:NO", "lock:A", "green", [] ], [ "lock:C", "esp:GND.2", "black", [] ]
+  ]
+}

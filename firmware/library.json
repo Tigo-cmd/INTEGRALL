@@ -1,7 +1,7 @@
 {
   "name": "Integrall",
-  "version": "1.1.0",
-  "description": "Unified IoT firmware framework for ESP32, ESP8266, and Arduino - simplifies hardware integration and backend communication",
+  "version": "1.2.0",
+  "description": "Unified IoT firmware framework for ESP32, ESP8266 and Arduino: non-blocking modules, self-test, MQTT cloud link",
   "keywords": "iot, esp32, esp8266, arduino, framework, relay, keypad, oled, lcd, sensors, servo, camera, automation",
   "repository": {
     "type": "git",
@@ -17,25 +17,57 @@
   "license": "MIT",
   "homepage": "https://integrall.io",
   "dependencies": {
-    "bblanchon/ArduinoJson": "^7.0.0"
+    "bblanchon/ArduinoJson": "^7.0.0",
+    "bertmelis/espMqttClient": "^1.7.3"
   },
   "frameworks": "arduino",
-  "platforms": ["espressif32", "espressif8266", "atmelavr"],
+  "platforms": [
+    "espressif32",
+    "espressif8266",
+    "atmelavr"
+  ],
   "examples": [
     {
-      "name": "Basic Relay Control",
+      "name": "ButtonBuzzer",
+      "base": "examples/ButtonBuzzer",
+      "files": [
+        "ButtonBuzzer.ino"
+      ]
+    },
+    {
+      "name": "BasicRelay",
       "base": "examples/BasicRelay",
-      "files": ["BasicRelay.ino"]
+      "files": [
+        "BasicRelay.ino"
+      ]
     },
     {
-      "name": "Keypad Lock System",
+      "name": "KeypadLock",
       "base": "examples/KeypadLock",
-      "files": ["KeypadLock.ino"]
+      "files": [
+        "KeypadLock.ino"
+      ]
     },
     {
-      "name": "Full Demo",
+      "name": "CloudMQTT",
+      "base": "examples/CloudMQTT",
+      "files": [
+        "CloudMQTT.ino"
+      ]
+    },
+    {
+      "name": "SerialOnlyTest",
+      "base": "examples/SerialOnlyTest",
+      "files": [
+        "SerialOnlyTest.ino"
+      ]
+    },
+    {
+      "name": "FullDemo",
       "base": "examples/FullDemo",
-      "files": ["FullDemo.ino"]
+      "files": [
+        "FullDemo.ino"
+      ]
     }
   ]
 }

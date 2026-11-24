@@ -1,68 +1,69 @@
-#include <WebServer.h>
+/**
+ * Dashboard.h — local web page for the fall detector (Integrall web server).
+ * Stores the emergency number in EEPROM (emulated flash on ESP32).
+ */
 #include <EEPROM.h>
 
 extern Integrall::System integrall;
 
-WebServer server(80);
-String emergencyNumber = "+2349021919686";
+String emergencyNumber = "+10000000000";   // placeholder: set yours on the dashboard
+String lastSmsStatus = "none";
 
-void savePhoneToEEPROM(String number) {
-    EEPROM.begin(64);
-    for (int i = 0; i < number.length(); ++i) {
-        EEPROM.write(i, number[i]);
-    }
-    EEPROM.write(number.length(), '\0');
+static const int PHONE_EEPROM_SIZE = 32;
+
+/** Accept only "+" followed by 6-15 digits (E.164). */
+bool validPhone(const String& n) {
+    if (n.length() < 7 || n.length() > 16 || n[0] != '+') return false;
+    for (size_t i = 1; i < n.length(); i++) if (!isDigit(n[i])) return false;
+    return true;
+}
+
+void savePhone(const String& number) {
+    EEPROM.begin(PHONE_EEPROM_SIZE);
+    for (int i = 0; i < PHONE_EEPROM_SIZE; i++) EEPROM.write(i, i < (int)number.length() ? number[i] : 0);
     EEPROM.commit();
 }
 
-String readPhoneFromEEPROM() {
-    EEPROM.begin(64);
-    String num = "";
-    for (int i = 0; i < 64; ++i) {
-        char c = char(EEPROM.read(i));
-        if (c == '\0' || c == 255) break; 
-        num += c;
+String loadPhone() {
+    EEPROM.begin(PHONE_EEPROM_SIZE);
+    String n;
+    for (int i = 0; i < PHONE_EEPROM_SIZE; i++) {
+        char c = (char)EEPROM.read(i);
+        if (c == '\0' || (uint8_t)c == 0xFF) break;
+        n += c;
     }
-    return num.length() > 5 ? num : "+2349021919686";
+    return validPhone(n) ? n : emergencyNumber;
 }
 
 void setupDashboard() {
-    emergencyNumber = readPhoneFromEEPROM();
-    
-    server.on("/", HTTP_GET, []() {
+    emergencyNumber = loadPhone();
+
+    integrall.onGet("/", []() {
         String posture = integrall.getPosture();
-        
-        String html = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'>";
-        html += "<style>body{font-family: Arial; padding: 20px;} ";
-        html += ".card{background:#fff; padding:20px; border-radius:10px; box-shadow:0 4px 8px rgba(0,0,0,0.1); margin-bottom:20px;} ";
-        html += "input[type=text]{padding:10px; width:100%;} ";
-        html += "input[type=submit]{padding:10px; background:#007BFF; color:white; border:none; border-radius:5px;}";
-        html += ".posture{font-size:32px; font-weight:bold; color:";
-        html += (posture == "Fallen") ? "red" : (posture == "Standing" ? "green" : "orange");
-        html += ";}</style><meta http-equiv='refresh' content='3'></head><body>";
-        
-        html += "<h1>Integrall Fall Monitor</h1>";
-        html += "<div class='card'><h2>Status</h2><div class='posture'>" + posture + "</div></div>";
-        html += "<div class='card'><h2>Emergency Config</h2>";
-        html += "<form action='/update' method='POST'><label>Number: " + emergencyNumber + "</label><br/>";
-        html += "<input type='text' name='phone' placeholder='+1234567890' required><br/><br/>";
-        html += "<input type='submit' value='Save'></form></div></body></html>";
-        
-        server.send(200, "text/html", html);
+        const char* color = (posture == "Fallen") ? "red" : (posture == "Standing" ? "green" : "amber");
+        String body = Integrall::HtmlBuilder::h1("Integrall Fall Monitor");
+        body += integrall.htmlCard("Status", integrall.htmlBadge(posture, color));
+        body += integrall.htmlCard("Modem",
+            String("Ready: ") + (integrall.cellularReady() ? "yes" : "no") +
+            "<br>Network: " + (integrall.cellularRegistered() ? "registered" : "searching") +
+            "<br>Last SMS: " + Integrall::HtmlBuilder::escape(lastSmsStatus));
+        body += integrall.htmlCard("Emergency number",
+            String("Current: <b>") + Integrall::HtmlBuilder::escape(emergencyNumber) + "</b>" +
+            "<form action='/update' method='POST'>"
+            "<input type='text' name='phone' placeholder='+2348000000000' pattern='\\+[0-9]{6,15}' required> "
+            "<input type='submit' value='Save'></form>");
+        integrall.webSendHtml(integrall.htmlPage("Fall Monitor", body, 3));
     });
 
-    server.on("/update", HTTP_POST, []() {
-        if (server.hasArg("phone")) {
-            emergencyNumber = server.arg("phone");
-            savePhoneToEEPROM(emergencyNumber);
+    integrall.onPost("/update", []() {
+        String phone = integrall.webArg("phone");
+        phone.trim();
+        if (!validPhone(phone)) {
+            integrall.webSendText("Invalid number: use + and 6-15 digits", 400);
+            return;
         }
-        server.sendHeader("Location", "/", true);
-        server.send(302, "text/plain", "");
+        emergencyNumber = phone;
+        savePhone(emergencyNumber);
+        integrall.webRedirect("/");
     });
-
-    server.begin();
-}
-
-void handleDashboard() {
-    server.handleClient();
 }

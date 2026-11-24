@@ -1,8 +1,17 @@
 /**
  * BuzzerModule.h
  *
- * Professional non-blocking buzzer control for Integrall Framework.
- * Replaces delay() with a state machine for patterns and tones.
+ * Non-blocking buzzer control for the Integrall Framework: patterns and tones
+ * run from handle(), never delay().
+ *
+ * Two kinds of buzzer:
+ *  - passive (default): a bare piezo/magnetic buzzer, driven with tone() at a frequency
+ *  - active:            a module with its own oscillator (usually marked "+" and
+ *                       sounds on plain 3.3/5 V); driven HIGH/LOW, frequency ignored
+ *        enableBuzzer(pin, true)
+ *
+ * on()/off() latch the buzzer; beep()/pattern()/alert()... play and stop by themselves
+ * (and cancel a latched on()).
  */
 
 #ifndef INTEGRALL_BUZZER_MODULE_H
@@ -18,23 +27,32 @@ namespace Integrall {
 
 class BuzzerModule {
 public:
-    BuzzerModule() : _pin(255), _initialized(false), _pattern_active(false), 
-                     _pattern_count(0), _freq(2000), _on_ms(0), _off_ms(0),
-                     _last_ms(0), _in_on_phase(false), _is_success(false) {}
+    BuzzerModule() {}
 
-    bool begin(uint8_t pin) {
+    /** @param active true for an active buzzer module (on/off, no tone). */
+    bool begin(uint8_t pin, bool active = false) {
         _pin = pin;
+        _active = active;
         pinMode(_pin, OUTPUT);
         digitalWrite(_pin, LOW);
         _initialized = true;
         return true;
     }
 
-    /**
-     * Start a non-blocking beep pattern
-     */
-    void pattern(uint8_t times, uint32_t onMs = 150, uint32_t offMs = 100, uint16_t freq = 2000) {
+    /** Sound continuously until off() (or a beep/pattern). */
+    void on(uint16_t freq = 2000) {
         if (!_initialized) return;
+        _pattern_active = false;
+        _is_success = false;
+        _continuous = true;
+        _freq = freq;
+        _start();
+    }
+
+    /** Start a non-blocking beep pattern. */
+    void pattern(uint8_t times, uint32_t onMs = 150, uint32_t offMs = 100, uint16_t freq = 2000) {
+        if (!_initialized || times == 0) return;
+        _continuous = false;
         _is_success = false;
         _pattern_count = times;
         _on_ms = onMs;
@@ -43,46 +61,38 @@ public:
         _pattern_active = true;
         _last_ms = millis();
         _in_on_phase = true;
-        tone(_pin, _freq);
+        _start();
     }
 
-    /**
-     * Play a specific frequency for a duration
-     */
-    void customTone(uint16_t freq, uint32_t durationMs) {
-        pattern(1, durationMs, 0, freq);
-    }
+    /** Play a frequency for a duration (passive buzzers; active ones just sound). */
+    void customTone(uint16_t freq, uint32_t durationMs) { pattern(1, durationMs, 0, freq); }
 
-    void alert()   { if(!_pattern_active) pattern(3, 100, 80, 2500); }
-    
-    /**
-     * Re-implemented descending/ascending success tone without blocking!
-     */
-    void success() { 
-        if(!_pattern_active) {
-            pattern(2, 100, 50, 1500); // Start with 1500Hz
+    void alert()   { if (!_pattern_active) pattern(3, 100, 80, 2500); }
+
+    /** Two rising tones (passive buzzer). */
+    void success() {
+        if (!_pattern_active) {
+            pattern(2, 100, 50, 1500);
             _is_success = true;
         }
     }
 
-    void failure() { if(!_pattern_active) pattern(1, 500, 0, 800); }
-    void beep(uint32_t ms = 150) { if(!_pattern_active) pattern(1, ms, 0, 2000); }
+    void failure() { if (!_pattern_active) pattern(1, 500, 0, 800); }
+    void beep(uint32_t ms = 150) { if (!_pattern_active) pattern(1, ms, 0, 2000); }
 
     void off() {
         _pattern_active = false;
-        if (_initialized) noTone(_pin);
+        _continuous = false;
+        if (_initialized) _stop();
     }
 
-    /**
-     * Call in loop() to process patterns
-     */
+    /** Call in loop() to run patterns. */
     void handle() {
         if (!_pattern_active || !_initialized) return;
-
-        unsigned long now = millis();
+        const unsigned long now = millis();
         if (_in_on_phase) {
             if (now - _last_ms >= _on_ms) {
-                noTone(_pin);
+                _stop();
                 _in_on_phase = false;
                 _last_ms = now;
                 if (_pattern_count > 0) _pattern_count--;
@@ -91,33 +101,35 @@ public:
                     _is_success = false;
                 }
             }
-        } else if (_pattern_count > 0) {
-            if (now - _last_ms >= _off_ms) {
-                // Feature: Handle frequency jump for melodic tones (Success)
-                if (_is_success && _pattern_count == 1) {
-                    _freq = 2500; // Jump to high tone for the second beep
-                }
-
-                tone(_pin, _freq);
-                _in_on_phase = true;
-                _last_ms = now;
-            }
+        } else if (_pattern_count > 0 && now - _last_ms >= _off_ms) {
+            if (_is_success && _pattern_count == 1) _freq = 2500;   // second, higher note
+            _start();
+            _in_on_phase = true;
+            _last_ms = now;
         }
     }
 
-    bool isActive() const { return _pattern_active; }
+    /** true while making (or about to make) sound: a pattern is running or on() is latched. */
+    bool isActive() const { return _pattern_active || _continuous; }
+    /** true while latched on with on(). */
+    bool isOn() const { return _continuous; }
 
 private:
-    uint8_t  _pin;
-    bool     _initialized;
-    bool     _pattern_active;
-    uint8_t  _pattern_count;
-    uint16_t _freq;
-    uint32_t _on_ms;
-    uint32_t _off_ms;
-    unsigned long _last_ms;
-    bool     _in_on_phase;
-    bool     _is_success; // Flag to indicate a multi-tone sequence
+    uint8_t  _pin = 255;
+    bool     _initialized = false;
+    bool     _active = false;          // active buzzer module: HIGH = sound
+    bool     _pattern_active = false;
+    bool     _continuous = false;
+    uint8_t  _pattern_count = 0;
+    uint16_t _freq = 2000;
+    uint32_t _on_ms = 0;
+    uint32_t _off_ms = 0;
+    unsigned long _last_ms = 0;
+    bool     _in_on_phase = false;
+    bool     _is_success = false;
+
+    void _start() { if (_active) digitalWrite(_pin, HIGH); else tone(_pin, _freq); }
+    void _stop()  { if (_active) digitalWrite(_pin, LOW);  else noTone(_pin); }
 };
 
 } // namespace Integrall

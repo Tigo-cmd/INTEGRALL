@@ -44,10 +44,8 @@ public:
      * Set color by RGB values (0-255 each)
      */
     void set(uint8_t r, uint8_t g, uint8_t b) {
-        if (!_initialized) return;
-        analogWrite(_rPin, _commonAnode ? 255 - r : r);
-        analogWrite(_gPin, _commonAnode ? 255 - g : g);
-        analogWrite(_bPin, _commonAnode ? 255 - b : b);
+        _blinking = false;
+        _write(r, g, b);
     }
 
     /**
@@ -70,26 +68,49 @@ public:
      * Turn off the LED
      */
     void off() {
-        if (!_initialized) return;
-        uint8_t v = _commonAnode ? 255 : 0;
-        analogWrite(_rPin, v);
-        analogWrite(_gPin, v);
-        analogWrite(_bPin, v);
+        _blinking = false;
+        _write(0, 0, 0);
     }
 
     /**
-     * Non-blocking blink (call in loop)
+     * Start (or keep) a non-blocking blink. Safe to call every loop: calling
+     * again with the same colour/interval does not restart the cycle.
+     * Any set()/setColor()/off() call stops blinking.
      */
-    void updateBlink(uint8_t r, uint8_t g, uint8_t b, uint32_t intervalMs = 500) {
-        unsigned long now = millis();
-        if (now - _lastBlink >= intervalMs) {
-            _blinkState = !_blinkState;
-            if (_blinkState) set(r, g, b); else off();
-            _lastBlink = now;
-        }
+    void blink(uint8_t r, uint8_t g, uint8_t b, uint32_t intervalMs = 500) {
+        if (_blinking && _br == r && _bg == g && _bb == b && _bi == intervalMs) return;
+        _br = r; _bg = g; _bb = b; _bi = intervalMs ? intervalMs : 500;
+        _blinking = true;
+        _blinkState = true;
+        _lastBlink = millis();
+        _write(r, g, b);
+    }
+
+    /** Legacy name for blink(). */
+    void updateBlink(uint8_t r, uint8_t g, uint8_t b, uint32_t intervalMs = 500) { blink(r, g, b, intervalMs); }
+
+    /** Called by System::handle(). */
+    void handle() {
+        if (!_blinking || !_initialized) return;
+        const unsigned long now = millis();
+        if (now - _lastBlink < _bi) return;
+        _lastBlink = now;
+        _blinkState = !_blinkState;
+        if (_blinkState) _write(_br, _bg, _bb); else _write(0, 0, 0);
     }
 
 private:
+    void _write(uint8_t r, uint8_t g, uint8_t b) {
+        if (!_initialized) return;
+        analogWrite(_rPin, _commonAnode ? 255 - r : r);
+        analogWrite(_gPin, _commonAnode ? 255 - g : g);
+        analogWrite(_bPin, _commonAnode ? 255 - b : b);
+    }
+
+    bool     _blinking = false;
+    uint8_t  _br = 0, _bg = 0, _bb = 0;
+    uint32_t _bi = 500;
+
     uint8_t _rPin, _gPin, _bPin;
     bool    _commonAnode;
     bool    _initialized;

@@ -39,9 +39,6 @@
  * This framework is designed for ESP32 and ESP8266, but supports 
  * standard Arduino boards in offline-only mode.
  */
-#if !defined(ESP32) && !defined(ESP8266)
-  #warning "Integrall: This board does not support networking. Switching to offline-only mode."
-#endif
 
 // ============================================================================
 // USER CONFIGURATION SECTION
@@ -63,6 +60,15 @@
 
 #include "config/IntegrallConfig.h"
 #include "core/Logger.h"
+#include "core/Util.h"
+
+// ArduinoJson is optional for offline builds (required for WiFi/MQTT).
+#if __has_include(<ArduinoJson.h>)
+  #include <ArduinoJson.h>
+  #define INTEGRALL_JSON_AVAILABLE 1
+#else
+  #define INTEGRALL_JSON_AVAILABLE 0
+#endif
 #include "core/DeviceManager.h"
 
 // Conditionally include modules based on user flags
@@ -136,6 +142,7 @@
 
 #include "modules/BlinkerModule.h"
 #include "modules/WebModule.h"
+#include "modules/MqttModule.h"
 
 // ============================================================================
 // MAIN SYSTEM CLASS
@@ -148,6 +155,15 @@ public:
     System();
     ~System();
     
+    /**
+     * Choose the I2C pins used by LCD/OLED/sensors (ESP32/ESP8266).
+     * Call BEFORE begin(). Default: the board's standard SDA/SCL.
+     */
+    void setI2CPins(int sda, int scl) { Util::i2cSetPins(sda, scl); }
+
+    /** Called (in loop context) when WiFi connects (true) or drops (false). */
+    void onConnectionChange(ConnectionCallback cb) { _device_manager.onConnectionChange(cb); }
+
     /**
      * Initialize the Integrall system with a config struct
      */
@@ -200,6 +216,40 @@ public:
             va_end(args);
             Serial.print(buffer);
         }
+        #else
+        (void)format;
+        #endif
+    }
+
+    /**
+     * Same as print()/println() but the format string stays in flash:
+     *   integrall.println(F("Temp: %d"), t);
+     * On Uno/Nano this saves RAM for every message (plain "..." literals are
+     * copied into the 2 KB of RAM at boot).
+     */
+    void print(const __FlashStringHelper* format, ...) {
+        #if INTEGRALL_DEBUG_LEVEL > 0
+        if (!Logger::ready()) return;
+        char buffer[128];
+        va_list args;
+        va_start(args, format);
+        _vformatP(buffer, sizeof(buffer), format, args);
+        va_end(args);
+        Serial.print(buffer);
+        #else
+        (void)format;
+        #endif
+    }
+
+    void println(const __FlashStringHelper* format, ...) {
+        #if INTEGRALL_DEBUG_LEVEL > 0
+        if (!Logger::ready()) return;
+        char buffer[128];
+        va_list args;
+        va_start(args, format);
+        _vformatP(buffer, sizeof(buffer), format, args);
+        va_end(args);
+        Serial.println(buffer);
         #else
         (void)format;
         #endif
@@ -308,8 +358,10 @@ public:
      */
     void allRelaysOff();
     void allRelaysOn() { _relay_module.allOn(); }
-    uint32_t relayGetOnTime(int relay_index) const { return (relay_index >= 0 && relay_index < _relay_count) ? _relay_module.getTotalOnTime(relay_index) : 0; }
-    uint8_t  relayGetToggleCount(int relay_index) const { return (relay_index >= 0 && relay_index < _relay_count) ? _relay_module.getToggleCount(relay_index) : 0; }
+    uint32_t relayGetOnTime(int relay_index) const { return (relay_index >= 0) ? _relay_module.getTotalOnTime(relay_index) : 0; }
+    uint32_t relayGetToggleCount(int relay_index) const { return (relay_index >= 0) ? _relay_module.getToggleCount(relay_index) : 0; }
+    /** Direct access to the relay driver for advanced use. */
+    RelayModule& relays() { return _relay_module; }
     
     #endif  // INTEGRALL_MODULE_RELAY_ENABLED
     
@@ -320,7 +372,7 @@ public:
     /**
      * Initialize the LCD manually with custom dimensions
      */
-    bool enableLCD(uint8_t address = 0x27, uint8_t cols = 16, uint8_t rows = 2) {
+    bool enableLCD(uint8_t address = 0, uint8_t cols = 16, uint8_t rows = 2) {
         return _lcd_module.begin(address, cols, rows);
     }
 
@@ -339,6 +391,16 @@ public:
      */
     void lcdClear() {
         _lcd_module.clear();
+    }
+
+    /** true if an LCD answered on the I2C bus. */
+    bool lcdPresent() const { return _lcd_module.isPresent(); }
+
+    /** Print "label value" e.g. lcdPrintValue("T:", 24.53, 0, 1) -> "T:24.5". AVR-safe. */
+    void lcdPrintValue(const char* label, float value, uint8_t col = 0, uint8_t row = 0, uint8_t decimals = 1) {
+        char num[12], buf[INTEGRALL_LCD_MAX_COLS + 1];
+        snprintf(buf, sizeof(buf), "%s%s", label ? label : "", Util::fmtFloat(num, sizeof(num), value, decimals));
+        _lcd_module.print(buf, col, row);
     }
     
     /**
@@ -368,6 +430,15 @@ public:
      */
     void lcdCreateChar(uint8_t slot, uint8_t charMap[]) {
         _lcd_module.createCustomChar(slot, charMap);
+    }
+
+    /**
+     * Show "WiFi: online/offline" on an LCD row whenever it changes.
+     * @param row LCD row to use, or -1 to disable (default: disabled)
+     */
+    void lcdShowNetworkStatus(int row = 1) {
+        _lcd_net_status_row = (int8_t)row;
+        _lcd_last_net_state = -1;
     }
     
     #endif  // INTEGRALL_MODULE_LCD_ENABLED
@@ -541,8 +612,8 @@ public:
     /**
      * Start the MPU6050 IMU sensor
      */
-    bool enableIMU(uint8_t sda = 21, uint8_t scl = 22) {
-        return _sensor_module.beginIMU(sda, scl);
+    bool enableIMU(int sda = -1, int scl = -1, uint8_t addr = 0x68) {
+        return _sensor_module.beginIMU(sda, scl, addr);
     }
     
     /**
@@ -578,18 +649,30 @@ public:
     #if INTEGRALL_MODULE_CELLULAR_ENABLED
     
     /**
-     * Start the SIM800L module
+     * Start the SIM800L modem (non-blocking; ready a few seconds later).
+     * ESP32: UART2 on rxPin/txPin. ESP8266/AVR: SoftwareSerial on those pins.
      */
-    bool cellularBegin(uint8_t rxPin = 16, uint8_t txPin = 17) {
-        return _cellular_module.begin(rxPin, txPin);
+    bool cellularBegin(uint8_t rxPin = 16, uint8_t txPin = 17, uint32_t baud = 9600) {
+        return _cellular_module.begin(rxPin, txPin, baud);
     }
-    
+
     /**
-     * Send an emergency SMS
+     * Queue an SMS (returns false if the queue is full / text > 160 chars).
+     * The real result arrives via onSMSResult().
      */
-    void sendSMS(const char* number, const char* message) {
-        _cellular_module.sendSMS(number, message);
+    bool sendSMS(const char* number, const char* message) {
+        return _cellular_module.sendSMS(number, message);
     }
+
+    void onSMSResult(SmsResultCallback cb)        { _cellular_module.onSMSResult(cb); }
+    void onIncomingCall(IncomingCallCallback cb)  { _cellular_module.onIncomingCall(cb); }
+    bool cellularReady() const                    { return _cellular_module.isReady(); }
+    bool cellularRegistered() const               { return _cellular_module.isRegistered(); }
+    /** 0-31, 99 = unknown. Call cellularRefreshSignal() to update. */
+    int  cellularSignal() const                   { return _cellular_module.signal(); }
+    void cellularRefreshSignal()                  { _cellular_module.refreshSignal(); }
+    bool cellularCall(const char* number)         { return _cellular_module.call(number); }
+    void cellularHangup()                         { _cellular_module.hangup(); }
     
     #endif // INTEGRALL_MODULE_CELLULAR_ENABLED
 
@@ -806,6 +889,10 @@ public:
      * @param row   Character row (0-indexed)
      * @param clear Clear screen before printing
      */
+    /** (Re)start the OLED at an address (0x3C/0x3D, 0 = auto). begin() already tries auto. */
+    bool enableOLED(uint8_t address = 0) { return _oled_module.begin(address); }
+    bool oledPresent() const { return _oled_module.isPresent(); }
+
     void oledPrint(const char* text, uint8_t col = 0, uint8_t row = 0, bool clear = false) {
         _oled_module.print(text, col, row, clear);
     }
@@ -823,6 +910,9 @@ public:
     void oledBar(uint8_t percent) {
         _oled_module.drawBar(percent);
     }
+
+    /** Push OLED changes now (normally done in handle()). Call after drawing with oled(). */
+    void oledFlush() { _oled_module.flush(); }
 
     /**
      * Clear the OLED screen
@@ -845,7 +935,11 @@ public:
     // ========================================================================
     #if INTEGRALL_MODULE_BUZZER_ENABLED
 
-    bool enableBuzzer(uint8_t pin) { return _buzzer_module.begin(pin); }
+    /** @param activeBuzzer true for an active buzzer module (sounds on plain HIGH; no tones). */
+    bool enableBuzzer(uint8_t pin, bool activeBuzzer = false) { return _buzzer_module.begin(pin, activeBuzzer); }
+    /** Sound continuously until buzzerOff(). */
+    void buzzerOn(uint16_t freq = 2000)                         { _buzzer_module.on(freq); }
+    bool buzzerIsOn() const                                     { return _buzzer_module.isOn(); }
     void buzzerBeep(uint32_t ms = 200)                          { _buzzer_module.beep(ms); }
     void buzzerTone(uint16_t freq, uint32_t ms = 200)           { _buzzer_module.customTone(freq, ms); }
     void buzzerPattern(uint8_t n, uint32_t on = 150, uint32_t off = 100) { _buzzer_module.pattern(n, on, off); }
@@ -853,11 +947,15 @@ public:
     void buzzerSuccess() { _buzzer_module.success(); }
     void buzzerFail()    { _buzzer_module.failure(); }
     void buzzerOff()     { _buzzer_module.off(); }
+    bool buzzerIsActive() const { return _buzzer_module.isActive(); }
     #else
+    bool buzzerIsActive() const { return false; }
+    bool buzzerIsOn() const { return false; }
+    void buzzerOn(uint16_t freq = 2000) { (void)freq; }
     void buzzerSuccess() {}
     void buzzerFail()    {}
     void buzzerOff()     {}
-    bool enableBuzzer(uint8_t pin) { (void)pin; return false; }
+    bool enableBuzzer(uint8_t pin, bool activeBuzzer = false) { (void)pin; (void)activeBuzzer; return false; }
     void buzzerBeep(uint32_t ms = 200) { (void)ms; }
     void buzzerTone(uint16_t freq, uint32_t ms = 200) { (void)freq; (void)ms; }
     void buzzerPattern(uint8_t n, uint32_t on = 150, uint32_t off = 100) { (void)n; (void)on; (void)off; }
@@ -875,8 +973,9 @@ public:
     void setRGB(uint8_t r, uint8_t g, uint8_t b) { _rgb_module.set(r, g, b); }
     void setColor(const char* name)               { _rgb_module.setColor(name); }
     void rgbOff()                                 { _rgb_module.off(); }
+    /** Non-blocking blink; call once (or every loop — it won't restart). */
     void rgbBlink(uint8_t r, uint8_t g, uint8_t b, uint32_t ms = 500) {
-        _rgb_module.updateBlink(r, g, b, ms);
+        _rgb_module.blink(r, g, b, ms);
     }
 
     #endif // INTEGRALL_MODULE_RGB_ENABLED
@@ -929,6 +1028,7 @@ public:
     // ========================================================================
     #if INTEGRALL_MODULE_INPUT_ENABLED
     bool inputButtonPressed(uint8_t pin, bool activeLow = true) { return _input_module.buttonPressed(pin, activeLow); }
+    bool inputButtonHeld(uint8_t pin, bool activeLow = true)    { return _input_module.buttonHeld(pin, activeLow); }
     int  inputReadJoystick(uint8_t pin, int center = 512, int deadzone = 50) { return _input_module.readJoystickAxis(pin, center, deadzone); }
     bool inputTouchActive(uint8_t pin) { return _input_module.touchActive(pin); }
     int  inputReadEncoder(uint8_t clk, uint8_t dt) { return _input_module.readEncoder(clk, dt); }
@@ -951,14 +1051,23 @@ public:
     // TIME MODULE API (available if INTEGRALL_ENABLE_TIME is defined)
     // ========================================================================
     #if INTEGRALL_MODULE_TIME_ENABLED
-    #if INTEGRALL_RTC_AVAILABLE
-    bool   timeBeginRTC() { return _time_module.beginRTC(); }
+    /** "HH:MM:SS" from RTC, else NTP, else "--:--:--". */
     String timeGetStr()   { return _time_module.getTimeString(); }
+    /** "YYYY-MM-DDTHH:MM:SS" from RTC, else NTP, else "". */
     String timeGetISO()   { return _time_module.getISODateTime(); }
+    #if INTEGRALL_RTC_AVAILABLE
+    bool   timeBeginRTC()               { return _time_module.beginRTC(); }
+    bool   timeRTCLostPower()           { return _time_module.rtcLostPower(); }
+    void   timeRTCSyncFromNTP(bool on = true) { _time_module.rtcSyncFromNTP(on); }
     #endif
     #if defined(ESP32) || defined(ESP8266)
-    void timeSetupNTP(const char* srv = "pool.ntp.org", long gmt = 0, int dst = 0) { _time_module.setupNTP(srv, gmt, dst); }
-    bool timeIsSynced() { return _time_module.isSyncDone(); }
+    void     timeSetupNTP(const char* srv = "pool.ntp.org", long gmt = 0, int dst = 0) { _time_module.setupNTP(srv, gmt, dst); }
+    bool     timeIsSynced()             { return _time_module.isSyncDone(); }
+    uint32_t timeEpoch()                { return _time_module.epoch(); }
+    #endif
+    #if INTEGRALL_GPS_AVAILABLE
+    void timeBeginGPS(HardwareSerial& p, uint32_t baud = 9600, int rx = -1, int tx = -1) { _time_module.beginGPS(p, baud, rx, tx); }
+    bool timeGPSHasFix()                { return _time_module.gpsHasFix(); }
     #endif
     #endif
 
@@ -1006,10 +1115,19 @@ public:
     // STEPPER MODULE API (available if INTEGRALL_ENABLE_STEPPER is defined)
     // ========================================================================
     #if INTEGRALL_MODULE_STEPPER_ENABLED
+    /** 4-wire motor (ULN2003/L298N). 28BYJ-48: stepperBegin(2048, IN1, IN3, IN2, IN4). */
     void stepperBegin(int spr, int p1, int p2, int p3, int p4) { _stepper_module.begin(spr, p1, p2, p3, p4); }
-    void stepperSpeed(int rpm)                                { _stepper_module.setSpeed(rpm); }
-    void stepperStep(int s)                                   { _stepper_module.step(s); }
-    void stepperMove(int deg)                                 { _stepper_module.moveDegrees(deg); }
+    /** STEP/DIR driver (A4988/DRV8825). enablePin -1 if unused. */
+    void stepperBeginDriver(int stepPin, int dirPin, int enablePin = -1, int spr = 200) { _stepper_module.beginDriver(stepPin, dirPin, enablePin, spr); }
+    void stepperSpeed(int rpm)       { _stepper_module.setSpeed(rpm); }
+    /** Queue N steps; returns immediately, motion happens in handle(). */
+    void stepperStep(long s)         { _stepper_module.step(s); }
+    void stepperMove(long deg)       { _stepper_module.moveDegrees(deg); }
+    void stepperMoveTo(long pos)     { _stepper_module.moveTo(pos); }
+    bool stepperIsMoving() const     { return _stepper_module.isMoving(); }
+    long stepperPosition() const     { return _stepper_module.position(); }
+    void stepperStop()               { _stepper_module.stop(); }
+    void stepperRelease()            { _stepper_module.release(); }
     #endif
 
     // extra input methods
@@ -1023,10 +1141,9 @@ public:
     #endif
 
     // extra time methods
-    #if INTEGRALL_MODULE_TIME_ENABLED
-    #if INTEGRALL_GPS_AVAILABLE
+    #if INTEGRALL_MODULE_TIME_ENABLED && INTEGRALL_GPS_AVAILABLE
+    /** Latest GPS position; lat/lng are NAN without a fix. */
     void timeGetGPS(HardwareSerial& p, float &lat, float &lng) { _time_module.getGPSLocation(p, lat, lng); }
-    #endif
     #endif
 
     // ========================================================================
@@ -1131,12 +1248,15 @@ public:
      * @param pirPin      PIR sensor GPIO pin
      * @param relayIndex  Relay to trigger (e.g., siren, light)
      * @param cooldownMs  Minimum time between alarm triggers (ms)
+     * @param sirenMs     How long the relay stays on per trigger (ms)
      */
-    void alarmSetup(uint8_t pirPin, int relayIndex, uint32_t cooldownMs = 10000) {
+    void alarmSetup(uint8_t pirPin, int relayIndex, uint32_t cooldownMs = 10000, uint32_t sirenMs = 5000) {
         _alarm_pir         = pirPin;
         _alarm_relay       = relayIndex;
         _alarm_cooldown    = cooldownMs;
+        _alarm_siren_ms    = sirenMs;
         _alarm_last_trig   = 0;
+        _alarm_siren_on    = false;
         _alarm_active      = true;
         pinMode(pirPin, INPUT);
         #if INTEGRALL_MODULE_LCD_ENABLED
@@ -1152,10 +1272,18 @@ public:
         if (!_alarm_active) return;
         bool motion = _sensor_module.isTriggered(_alarm_pir);
         unsigned long now = millis();
-        if (motion && (now - _alarm_last_trig > _alarm_cooldown)) {
+        if (_alarm_siren_on && (now - _alarm_last_trig >= _alarm_siren_ms)) {
+            _alarm_siren_on = false;
+            relayOff(_alarm_relay);
+            #if INTEGRALL_MODULE_LCD_ENABLED
+            _lcd_module.print(" == ALARM SYS ==", 0, 0);
+            _lcd_module.print("   Monitoring   ", 0, 1);
+            #endif
+        }
+        if (motion && (_alarm_last_trig == 0 || now - _alarm_last_trig > _alarm_cooldown)) {
             _alarm_last_trig = now;
+            _alarm_siren_on = true;
             relayOn(_alarm_relay);
-            relaySetTimeout(_alarm_relay, 5000);
             #if INTEGRALL_MODULE_LCD_ENABLED
             _lcd_module.print(" !! INTRUDER !! ", 0, 0);
             _lcd_module.print("  ALARM ON!     ", 0, 1);
@@ -1200,11 +1328,15 @@ public:
      */
     void parkingUpdate() {
         if (!_park_active) return;
-        float d = _sensor_module.readDistanceCM(_park_trig, _park_echo, 2);
-        if (d < 0) return;
+        float d = _sensor_module.readDistanceCM(_park_trig, _park_echo, 3);
         #if INTEGRALL_MODULE_LCD_ENABLED
-        char buf[17];
-        snprintf(buf, sizeof(buf), " Dist: %.1f cm   ", d);
+        if (!valid(d)) {
+            _lcd_module.print(" Dist: --- cm", 0, 0);
+            _lcd_module.print("  No echo       ", 0, 1);
+            return;
+        }
+        char num[10], buf[24];
+        snprintf(buf, sizeof(buf), " Dist: %s cm", Util::fmtFloat(num, sizeof(num), d, 1));
         _lcd_module.print(buf, 0, 0);
         if (_park_stop > 0 && d <= _park_stop) {
             _lcd_module.print("  !! STOP !!    ", 0, 1);
@@ -1216,6 +1348,8 @@ public:
         } else {
             _lcd_module.print("  Safe          ", 0, 1);
         }
+        #else
+        (void)d;
         #endif
     }
 
@@ -1255,7 +1389,7 @@ public:
         _wx_last = now;
         float t = _sensor_module.readTemperature(_wx_pin, _wx_type);
         float h = _sensor_module.readHumidity(_wx_pin, _wx_type);
-        if (t == -999.0f || h < 0) {
+        if (!valid(t) || !valid(h)) {
             #if INTEGRALL_MODULE_LCD_ENABLED
             _lcd_module.print("! Sensor Error !", 0, 0);
             _lcd_module.print("  Check Wiring  ", 0, 1);
@@ -1264,20 +1398,16 @@ public:
             return;
         }
         #if INTEGRALL_MODULE_LCD_ENABLED
-        char row0[17], row1[17];
-        snprintf(row0, sizeof(row0), " Temp: %.1fC     ", t);
-        snprintf(row1, sizeof(row1), " Humi: %.0f%%     ", h);
+        char nt[10], nh[10], row0[17], row1[17];
+        snprintf(row0, sizeof(row0), " Temp: %sC", Util::fmtFloat(nt, sizeof(nt), t, 1));
+        snprintf(row1, sizeof(row1), " Humi: %s%%", Util::fmtFloat(nh, sizeof(nh), h, 0));
         _lcd_module.print(row0, 0, 0);
         _lcd_module.print(row1, 0, 1);
         #endif
         // Auto-send to backend if online
         #if INTEGRALL_NETWORK_AVAILABLE
-        if (isWiFiConnected() && _config.backend_url) {
-            #if ARDUINOJSON_VERSION_MAJOR >= 7
+        if (isOnline()) {
             JsonDocument doc;
-            #else
-            StaticJsonDocument<128> doc;
-            #endif
             doc["temperature"] = t;
             doc["humidity"] = h;
             sendTelemetry(doc);
@@ -1497,27 +1627,101 @@ public:
     void   onPut(const char* uri, WebRouteCallback handler)      { _web_module.onPut(uri, handler); }
     void   onPatch(const char* uri, WebRouteCallback handler)    { _web_module.onPatch(uri, handler); }
     void   onDelete(const char* uri, WebRouteCallback handler)   { _web_module.onDelete(uri, handler); }
+    /** Route for any HTTP method. */
+    void   onAny(const char* uri, WebRouteCallback handler)      { _web_module.on(uri, handler); }
     void   servePage(const char* uri, const String& html)        { _web_module.servePage(uri, html); }
     void   serveJson(const char* uri, const String& json)        { _web_module.serveJson(uri, json); }
     String webArg(const char* name)                              { return _web_module.arg(name); }
+    bool   webHasArg(const char* name)                           { return _web_module.hasArg(name); }
     String webBody()                                             { return _web_module.body(); }
+    String webHeader(const char* name)                           { return _web_module.header(name); }
     void   webSendHtml(const String& html, int code = 200)       { _web_module.sendHtml(html, code); }
     void   webSendJson(const String& json, int code = 200)       { _web_module.sendJson(json, code); }
     void   webSendText(const String& text, int code = 200)       { _web_module.sendText(text, code); }
     void   webRedirect(const char* location, int code = 302)     { _web_module.sendRedirect(location, code); }
-    #endif
+    /** Require HTTP Basic auth on every page/route (nullptr, nullptr = off). */
+    void   webSetAuth(const char* user, const char* pass)        { _web_module.setAuth(user, pass); }
+    /** Allow browsers on another origin to call this device (adds CORS headers). */
+    void   webEnableCORS(const char* origin = "*")               { _web_module.enableCORS(origin); }
+    /** Turn off cross-site request protection (not recommended). */
+    void   webAllowCrossSite(bool allow = true)                  { _web_module.allowCrossSite(allow); }
 
-    #if defined(ESP32) || defined(ESP8266)
     bool    wsServerBegin(uint16_t port = 81)                    { return _web_module.beginWsServer(port); }
     void    onWsMessage(WsMessageCallback cb)                    { _web_module.onWsMessage(cb); }
     uint8_t wsBroadcast(const char* message)                     { return _web_module.wsBroadcast(message); }
     uint8_t wsClientCount()                                      { return _web_module.wsClientCount(); }
+    /** ws:// or wss:// — stays connected (auto-reconnect) until wsDisconnect(). */
     bool    wsConnect(const char* url)                           { return _web_module.wsConnect(url); }
     bool    wsConnect(const char* host, uint16_t port, const char* path = "/") { return _web_module.wsConnect(host, port, path); }
+    void    wsSetCACert(const char* rootCA)                      { _web_module.wsSetCACert(rootCA); }
     bool    wsSend(const char* message)                          { return _web_module.wsSend(message); }
     void    onWsClientMessage(WsMessageCallback cb)              { _web_module.onWsClientMessage(cb); }
     bool    wsConnected()                                        { return _web_module.wsConnected(); }
     void    wsDisconnect()                                       { _web_module.wsDisconnect(); }
+    #endif
+
+    // ========================================================================
+    // CLOUD (MQTT) API — requires INTEGRALL_ENABLE_MQTT
+    // ========================================================================
+    #if INTEGRALL_MODULE_MQTT_ENABLED && INTEGRALL_NETWORK_AVAILABLE
+    /** true while the MQTT session with the broker is up. */
+    bool isCloudConnected() const { return _mqtt_module.isConnected(); }
+
+    /**
+     * Handle cloud commands yourself. Call reply.ok()/fail() for actions you
+     * own; leave it untouched to fall back to the built-ins (relay.set, ping, ...).
+     */
+    void onCommand(CommandHandler h) { _mqtt_module.onCommand(h); }
+
+    /** Publish an event (QoS1), e.g. sendEvent("door", "opened"). */
+    bool sendEvent(const char* type, const char* detail) { return _mqtt_module.publishEvent(type, detail); }
+
+    /** Publish raw text/JSON on integrall/<id>/<suffix>. */
+    bool publish(const char* suffix, const char* payload, uint8_t qos = 0, bool retain = false) {
+        return _mqtt_module.publish(suffix, payload, qos, retain);
+    }
+
+    typedef bool (*SwitchGetter)();
+    typedef void (*SwitchSetter)(bool on);
+    /**
+     * Expose any on/off output to the cloud as a named switch, e.g.
+     *   addCloudSwitch("buzzer", [] { return integrall.buzzerIsOn(); },
+     *                            [](bool on) { on ? integrall.buzzerOn() : integrall.buzzerOff(); });
+     * Dashboards (OpenRemote) get a writable on/off attribute with that name. State
+     * changes from anywhere (button, sketch, cloud) are republished automatically.
+     * Built-in commands: switch.set {name,on}, switch.toggle {name}, switch.get {name}.
+     * @return false if the table is full (INTEGRALL_MAX_CLOUD_SWITCHES) or args are bad.
+     */
+    bool addCloudSwitch(const char* name, SwitchGetter get, SwitchSetter set) {
+        if (!name || !*name || !get || !set || _switch_count >= INTEGRALL_MAX_CLOUD_SWITCHES) return false;
+        _switches[_switch_count++] = {name, get, set};
+        if (_mqtt_module.isConnected()) _mqttConnected(this);
+        return true;
+    }
+
+    /** Re-run the self-test and publish it as retained health. */
+    bool publishHealth() {
+        JsonDocument doc;
+        selfTest(&doc, false);
+        return _mqtt_module.publishJson("health", doc, 1, true);
+    }
+    #else
+    bool isCloudConnected() const { return false; }
+    #endif
+
+    // ========================================================================
+    // SELF-TEST: which parts are actually connected?
+    // ========================================================================
+    /**
+     * Probe the hardware: scans the I2C bus and checks every enabled module
+     * for a real device. Prints a table to Serial (if printTable) and
+     * optionally fills `out` with {"parts":{...}, "i2c":[...], ...}.
+     * @return number of enabled parts that did NOT respond.
+     */
+    #if INTEGRALL_JSON_AVAILABLE
+    int selfTest(JsonDocument* out = nullptr, bool printTable = true);
+    #else
+    int selfTest(bool printTable = true);
     #endif
 
     /**
@@ -1548,11 +1752,12 @@ private:
     
     #if INTEGRALL_MODULE_RELAY_ENABLED
     RelayModule _relay_module;
-    int _relay_count;
     #endif
 
     #if INTEGRALL_MODULE_LCD_ENABLED
     LCDModule _lcd_module;
+    int8_t    _lcd_net_status_row = -1;
+    int8_t    _lcd_last_net_state = -1;
     #endif
 
     #if INTEGRALL_MODULE_SENSORS_ENABLED || INTEGRALL_MODULE_IMU_ENABLED
@@ -1641,6 +1846,8 @@ private:
     uint8_t       _alarm_pir      = 0;
     int           _alarm_relay    = 0;
     uint32_t      _alarm_cooldown = 10000;
+    uint32_t      _alarm_siren_ms = 5000;
+    bool          _alarm_siren_on = false;
     unsigned long _alarm_last_trig = 0;
     #endif
 
@@ -1676,6 +1883,25 @@ private:
     HtmlBuilder   _html_builder;
     bool _event_log_enabled = true;
 
+    #if INTEGRALL_MODULE_MQTT_ENABLED && INTEGRALL_NETWORK_AVAILABLE
+    MqttModule    _mqtt_module;
+    unsigned long _reboot_at = 0;
+    uint32_t      _relay_mask_sent = 0;
+    struct CloudSwitch { const char* name; SwitchGetter get; SwitchSetter set; };
+    CloudSwitch   _switches[INTEGRALL_MAX_CLOUD_SWITCHES];
+    uint8_t       _switch_count = 0;
+    uint32_t      _switch_mask_sent = 0;
+    int           _findSwitch(const char* name) const {
+        for (uint8_t i = 0; i < _switch_count; i++) if (name && strcmp(_switches[i].name, name) == 0) return i;
+        return -1;
+    }
+    bool          _health_sent = false;     // health once per connection (and on "health" cmd)
+    unsigned long _relay_meta_at = 0;
+    void _startMqtt(const DeviceConfig& cfg);
+    static void _mqttConnected(void* ctx);
+    static void _mqttBuiltin(void* ctx, const char* action, JsonVariantConst args, CommandReply& reply);
+    #endif
+
     /**
      * Internal helper to log events to backend and serial
      */
@@ -1684,21 +1910,24 @@ private:
         (void)detail;
         INTEGRALL_LOG_INFO_VAL("Event: ", event_type);
         #if INTEGRALL_NETWORK_AVAILABLE
-        if (_event_log_enabled && isOnline()) {
-            #if ARDUINOJSON_VERSION_MAJOR >= 7
-            JsonDocument doc;
-            #else
-            StaticJsonDocument<128> doc;
-            #endif
-            doc["event"] = event_type;
-            doc["detail"] = detail;
-            sendTelemetry(doc);
+        #if INTEGRALL_MODULE_MQTT_ENABLED && INTEGRALL_NETWORK_AVAILABLE
+        if (_event_log_enabled) {
+            _mqtt_module.publishEvent(event_type, detail);
         }
+        #endif
         #endif
     }
 
     void _beginModules();
     void _handleModules();
+
+    static void _vformatP(char* buf, size_t len, const __FlashStringHelper* fmt, va_list args) {
+        #if defined(__AVR__) || defined(ESP8266)
+        vsnprintf_P(buf, len, (PGM_P)fmt, args);
+        #else
+        vsnprintf(buf, len, reinterpret_cast<const char*>(fmt), args);
+        #endif
+    }
 };
 
 } // namespace Integrall
@@ -1709,22 +1938,13 @@ private:
 
 namespace Integrall {
 
-System::System() 
-    : _initialized(false)
-    #if INTEGRALL_MODULE_RELAY_ENABLED
-    , _relay_count(0)
-    #endif
-{
-}
+inline System::System() : _initialized(false) {}
 
-System::~System() {
-}
+inline System::~System() {}
 
-void System::_beginModules() {
+inline void System::_beginModules() {
     #if INTEGRALL_MODULE_RELAY_ENABLED
-    if (!_relay_module.begin(4)) {  // Support up to 4 relays
-        INTEGRALL_LOG_ERROR("RelayModule initialization failed");
-    }
+    _relay_module.begin();
     #endif
 
     #if INTEGRALL_MODULE_LCD_ENABLED
@@ -1748,7 +1968,7 @@ void System::_beginModules() {
     #endif
 }
 
-bool System::begin(const DeviceConfig& config) {
+inline bool System::begin(const DeviceConfig& config) {
     // 0. The ABSOLUTE first step is starting the Serial port for debugging
     Logger::begin(115200); 
     
@@ -1764,30 +1984,29 @@ bool System::begin(const DeviceConfig& config) {
     
     // Always initialize enabled hardware modules even if WiFi is temporarily unreachable
     _beginModules();
+
+    #if INTEGRALL_MODULE_MQTT_ENABLED && INTEGRALL_NETWORK_AVAILABLE
+    _startMqtt(config);
+    #endif
     
     _initialized = true;
     INTEGRALL_LOG_INFO("=== Integrall System Ready ===");
     return net_ok;
 }
 
-void System::handle() {
+inline void System::handle() {
     if (!_initialized) return;
     
     // Handle core device management
     _device_manager.handle();
     
-    // Auto-update LCD with WiFi status only on state changes when WiFi is configured
-    #if INTEGRALL_MODULE_LCD_ENABLED && INTEGRALL_MODULE_WIFI_ENABLED
-    if (_config.wifi_ssid && strlen(_config.wifi_ssid) > 0 && !_config.use_wifi_manager) {
-        static int _last_lcd_net_state = -1;
-        int cur_state = !isWiFiConnected() ? 0 : (!isOnline() ? 1 : 2);
-        if (cur_state != _last_lcd_net_state) {
-            _last_lcd_net_state = cur_state;
-            if (cur_state == 0) {
-                _lcd_module.print("WiFi Discon...", 0, 1);
-            } else if (cur_state == 1 && _config.backend_url && _config.api_key) {
-                _lcd_module.print("Syncing Cloud..", 0, 1);
-            }
+    // Optional: show network state on the LCD (opt-in via lcdShowNetworkStatus)
+    #if INTEGRALL_MODULE_LCD_ENABLED && INTEGRALL_NETWORK_AVAILABLE
+    if (_lcd_net_status_row >= 0) {
+        int cur = isOnline() ? 1 : 0;
+        if (cur != _lcd_last_net_state) {
+            _lcd_last_net_state = cur;
+            _lcd_module.print(cur ? "WiFi: online    " : "WiFi: offline   ", 0, (uint8_t)_lcd_net_status_row);
         }
     }
     #endif
@@ -1796,7 +2015,7 @@ void System::handle() {
     _handleModules();
 }
 
-bool System::begin() {
+inline bool System::begin() {
     DeviceConfig defaultConfig;
     #ifdef INTEGRALL_DEFAULT_SSID
     defaultConfig.wifi_ssid = INTEGRALL_DEFAULT_SSID;
@@ -1813,23 +2032,60 @@ bool System::begin() {
     return begin(defaultConfig);
 }
 
-void System::_handleModules() {
+inline void System::_handleModules() {
     #if INTEGRALL_MODULE_RELAY_ENABLED
     _relay_module.handle();
     #endif
-    
+    #if INTEGRALL_MODULE_KEYPAD_ENABLED
+    _keypad_module.handle();
+    #endif
+    #if INTEGRALL_MODULE_SENSORS_ENABLED || INTEGRALL_MODULE_IMU_ENABLED
+    _sensor_module.handle();
+    #endif
     #if INTEGRALL_MODULE_BUZZER_ENABLED
     _buzzer_module.handle();
     #endif
-
-    #if INTEGRALL_MODULE_LCD_ENABLED
-    _lcd_module.handle();
-    #endif
-
     #if INTEGRALL_MODULE_SERVO_ENABLED
     _servo_module.handle();
     #endif
-
+    #if INTEGRALL_MODULE_STEPPER_ENABLED
+    _stepper_module.handle();
+    #endif
+    #if INTEGRALL_MODULE_RGB_ENABLED
+    _rgb_module.handle();
+    #endif
+    #if INTEGRALL_MODULE_CELLULAR_ENABLED
+    _cellular_module.handle();
+    #endif
+    #if INTEGRALL_MODULE_TIME_ENABLED
+    _time_module.handle();
+    #endif
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    _lcd_module.handle();
+    #endif
+    #if INTEGRALL_MODULE_OLED_ENABLED
+    _oled_module.handle();
+    #endif
+    #if INTEGRALL_MODULE_MQTT_ENABLED && INTEGRALL_NETWORK_AVAILABLE
+    _mqtt_module.handle(isWiFiConnected());
+    if (_reboot_at && (long)(millis() - _reboot_at) >= 0) ESP.restart();
+    // Any relay / cloud-switch change (cloud command, button, timeout, sketch) -> republish
+    // retained meta so dashboards always show the true state. Rate-limited to 4/s.
+    {
+        uint32_t mask = 0, smask = 0;
+        #if INTEGRALL_MODULE_RELAY_ENABLED
+        for (uint8_t i = 0; i < INTEGRALL_MAX_RELAYS && i < 32; i++) if (_relay_module.isOn(i)) mask |= (1UL << i);
+        #endif
+        for (uint8_t i = 0; i < _switch_count; i++) if (_switches[i].get()) smask |= (1UL << i);
+        if ((mask != _relay_mask_sent || smask != _switch_mask_sent) && _mqtt_module.isConnected()
+            && millis() - _relay_meta_at >= 250) {
+            _relay_mask_sent = mask;
+            _switch_mask_sent = smask;
+            _relay_meta_at = millis();
+            _mqttConnected(this);   // republishes meta (+ health)
+        }
+    }
+    #endif
     _blinker.handle();
     _web_module.handle();
 }
@@ -1837,99 +2093,89 @@ void System::_handleModules() {
 // Relay Module implementations
 #if INTEGRALL_MODULE_RELAY_ENABLED
 
-int System::enableRelay(uint8_t pin, bool active_low, const char* name) {
+inline int System::enableRelay(uint8_t pin, bool active_low, const char* name) {
     if (!_initialized) {
-        INTEGRALL_LOG_ERROR("System not initialized");
+        INTEGRALL_LOG_ERROR("enableRelay() called before begin()");
         return -1;
     }
-    
-    RelayConfig config;
-    config.pin = pin;
-    config.active_low = active_low;
-    config.name = name;
-    config.safety_timeout_ms = 0;
-    config.default_state = false;
-    config.interlock_group = 0;
-    
-    if (_relay_module.addRelay(_relay_count, config)) {
+    int idx = _relay_module.addRelay(pin, active_low, name);
+    if (idx >= 0) {
         INTEGRALL_LOG_INFO_VAL("Relay enabled on pin ", pin);
-        return _relay_count++;
     }
-    
-    return -1;
+    return idx;
 }
 
-void System::relayOn(int relay_index) {
-    if (relay_index >= 0 && relay_index < _relay_count) {
+inline void System::relayOn(int relay_index) {
+    if (relay_index >= 0) {
         _relay_module.on(relay_index);
     }
 }
 
-void System::relayOff(int relay_index) {
-    if (relay_index >= 0 && relay_index < _relay_count) {
+inline void System::relayOff(int relay_index) {
+    if (relay_index >= 0) {
         _relay_module.off(relay_index);
     }
 }
 
-void System::relayToggle(int relay_index) {
-    if (relay_index >= 0 && relay_index < _relay_count) {
+inline void System::relayToggle(int relay_index) {
+    if (relay_index >= 0) {
         _relay_module.toggle(relay_index);
     }
 }
 
-void System::relaySetTimeout(int relay_index, uint32_t duration_ms) {
-    if (relay_index >= 0 && relay_index < _relay_count) {
+inline void System::relaySetTimeout(int relay_index, uint32_t duration_ms) {
+    if (relay_index >= 0) {
         _relay_module.setSafetyTimeout(relay_index, duration_ms);
     }
 }
 
-void System::relaySetInterlock(int relay_index, uint8_t group) {
-    if (relay_index >= 0 && relay_index < _relay_count) {
+inline void System::relaySetInterlock(int relay_index, uint8_t group) {
+    if (relay_index >= 0) {
         _relay_module.setInterlockGroup(relay_index, group);
     }
 }
 
-void System::relayAttachButton(int relay_index, uint8_t button_pin, bool active_low) {
-    if (relay_index >= 0 && relay_index < _relay_count) {
+inline void System::relayAttachButton(int relay_index, uint8_t button_pin, bool active_low) {
+    if (relay_index >= 0) {
         _relay_module.attachTrigger(relay_index, button_pin, active_low);
     }
 }
 
-bool System::relayIsOn(int relay_index) {
-    if (relay_index >= 0 && relay_index < _relay_count) {
+inline bool System::relayIsOn(int relay_index) {
+    if (relay_index >= 0) {
         return _relay_module.isOn(relay_index);
     }
     return false;
 }
 
-void System::allRelaysOff() {
+inline void System::allRelaysOff() {
     _relay_module.allOff();
 }
 
 #endif  // INTEGRALL_MODULE_RELAY_ENABLED
 
 // System Status implementations
-bool System::isOnline() const {
+inline bool System::isOnline() const {
     return _device_manager.isOnline();
 }
 
-bool System::isWiFiConnected() const {
+inline bool System::isWiFiConnected() const {
     return _device_manager.isWiFiConnected();
 }
 
-const char* System::getDeviceId() const {
+inline const char* System::getDeviceId() const {
     return _device_manager.getDeviceId();
 }
 
-const char* System::getIPAddress() const {
+inline const char* System::getIPAddress() const {
     return _device_manager.getDeviceIp();
 }
 
-int System::getWiFiStrength() const {
+inline int System::getWiFiStrength() const {
     return _device_manager.getWiFiStrength();
 }
 
-const char* System::getStatusString() const {
+inline const char* System::getStatusString() const {
     switch (_device_manager.getState()) {
         case DeviceState::UNINITIALIZED: return "UNINITIALIZED";
         case DeviceState::CONFIGURING: return "CONFIGURING";
@@ -1939,48 +2185,358 @@ const char* System::getStatusString() const {
         case DeviceState::REGISTERING: return "REGISTERING";
         case DeviceState::ONLINE: return "ONLINE";
         case DeviceState::ERROR: return "ERROR";
+        case DeviceState::OFFLINE: return "OFFLINE";
         default: return "UNKNOWN";
     }
 }
 
-void System::reconnect() {
+inline void System::reconnect() {
     _device_manager.reconnect();
 }
 
+#if INTEGRALL_NETWORK_AVAILABLE
+inline bool System::sendTelemetry(const char* key, float value) {
+    JsonDocument doc;
+    doc[key] = value;
+    return sendTelemetry(doc);
+}
+
+inline bool System::sendTelemetry(const char* key, const char* value) {
+    JsonDocument doc;
+    doc[key] = value;
+    return sendTelemetry(doc);
+}
+
+/**
+ * Publish a telemetry document to the cloud.
+ * Requires INTEGRALL_ENABLE_MQTT (non-blocking; queued if offline-buffering is on).
+ */
+inline bool System::sendTelemetry(const JsonDocument& data) {
+    #if INTEGRALL_MODULE_MQTT_ENABLED && INTEGRALL_NETWORK_AVAILABLE
+    return _mqtt_module.publishTelemetry(data);
+    #else
+    (void)data;
+    static bool warned = false;
+    if (!warned) {
+        warned = true;
+        INTEGRALL_LOG_WARN("sendTelemetry() needs INTEGRALL_ENABLE_MQTT (cloud link); data dropped");
+    }
+    return false;
+    #endif
+}
+#endif
+
+
+// ============================================================================
+// SELF-TEST
+// ============================================================================
+namespace Detail {
+/** Name of a common part at an I2C address (strings stay in flash on AVR). */
+inline const __FlashStringHelper* i2cName(uint8_t a) {
+    switch (a) {
+        case 0x23: case 0x5C: return F("BH1750");
+        case 0x27: return F("LCD (PCF8574)");
+        case 0x3F: return F("LCD (PCF8574A)");
+        case 0x29: return F("VL53L0X");
+        case 0x3C: case 0x3D: return F("OLED SSD1306");
+        case 0x40: return F("INA219");
+        case 0x44: case 0x45: return F("SHT3x");
+        case 0x57: return F("AT24C32 EEPROM (RTC board)");
+        case 0x68: return F("MPU6050 / DS3231");
+        case 0x69: return F("MPU6050");
+        case 0x76: case 0x77: return F("BME/BMP280");
+        default: return F("unknown");
+    }
+}
+}
+
+#if INTEGRALL_JSON_AVAILABLE
+  #define INTEGRALL_JOUT(stmt) do { if (out) { stmt; } } while (0)
+inline int System::selfTest(JsonDocument* out, bool printTable) {
+#else
+  #define INTEGRALL_JOUT(stmt) do { } while (0)
+inline int System::selfTest(bool printTable) {
+#endif
+    int missing = 0;
+    #if INTEGRALL_DEBUG_LEVEL > 0
+    const bool pr = printTable && Logger::ready();
+    #else
+    const bool pr = false; (void)printTable;
+    #endif
+    auto report = [&](const __FlashStringHelper* part, bool ok, const __FlashStringHelper* hint) {
+        if (!ok) missing++;
+        INTEGRALL_JOUT((*out)["parts"][part] = ok);
+        #if INTEGRALL_DEBUG_LEVEL > 0
+        if (pr) {
+            Serial.print(ok ? F("  [ OK ] ") : F("  [MISS] "));
+            Serial.print(part);
+            if (!ok && hint) { Serial.print(F("  -> ")); Serial.print(hint); }
+            Serial.println();
+        }
+        #else
+        (void)hint;
+        #endif
+    };
+
+    (void)report;   // unused when no presence-checkable module is enabled
+    #if INTEGRALL_DEBUG_LEVEL > 0
+    if (pr) Serial.println(F("\n=== Integrall self-test ==="));
+    #endif
+
+    // I2C scan
+    #if INTEGRALL_HAS_WIRE
+    Util::i2cBegin();
+    uint8_t found = 0;
+    for (uint8_t a = 0x08; a < 0x78; a++) {
+        if (!Util::i2cPresent(a)) continue;
+        found++;
+        #if INTEGRALL_JSON_AVAILABLE
+        if (out) {
+            char hex[6]; snprintf(hex, sizeof(hex), "0x%02X", a);
+            (*out)["i2c"].add(hex);
+        }
+        #endif
+        #if INTEGRALL_DEBUG_LEVEL > 0
+        if (pr) {
+            Serial.print(F("  I2C 0x"));
+            if (a < 0x10) Serial.print('0');
+            Serial.print(a, HEX);
+            Serial.print(F("  "));
+            Serial.println(Detail::i2cName(a));
+        }
+        #endif
+    }
+    #if INTEGRALL_DEBUG_LEVEL > 0
+    if (pr && found == 0) Serial.println(F("  I2C: no devices (check SDA/SCL + pull-ups)"));
+    #else
+    (void)found;
+    #endif
+    #endif
+
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    report(F("lcd"), _lcd_module.isPresent(), F("no LCD at 0x27/0x3F"));
+    #endif
+    #if INTEGRALL_MODULE_OLED_ENABLED
+    report(F("oled"), _oled_module.isPresent(), F("no OLED at 0x3C/0x3D"));
+    #endif
+    #if INTEGRALL_MODULE_IMU_ENABLED
+    report(F("imu"), _sensor_module.imuReady(), F("call enableIMU(); MPU6050 at 0x68"));
+    #endif
+    #if INTEGRALL_MODULE_KEYPAD_ENABLED
+    report(F("keypad"), _keypad_module.isReady(), F("call enableKeypad(rows, cols)"));
+    #endif
+    #if INTEGRALL_MODULE_CELLULAR_ENABLED
+    report(F("cellular"), _cellular_module.isReady(), F("modem not answering AT (power 3.7-4.2V/2A, RX/TX swapped?)"));
+    #endif
+    #if INTEGRALL_MODULE_POWER_ENABLED && INTEGRALL_INA219_AVAILABLE
+    report(F("ina219"), _power_module.inaReady(), F("call powerBeginINA(); INA219 at 0x40"));
+    #endif
     #if INTEGRALL_NETWORK_AVAILABLE
-    /**
-     * Send a single numeric value to the cloud backend
-     */
-    bool System::sendTelemetry(const char* key, float value) {
-        #if ARDUINOJSON_VERSION_MAJOR >= 7
-        JsonDocument doc;
-        #else
-        StaticJsonDocument<128> doc;
-        #endif
-        doc[key] = value;
-        return _device_manager.sendTelemetry(doc);
-    }
+    report(F("wifi"), isWiFiConnected(), F("not connected yet / wrong credentials"));
+    #if INTEGRALL_MODULE_MQTT_ENABLED
+    report(F("cloud"), isCloudConnected(), F("broker unreachable / bad token"));
+    #endif
+    #endif
 
-    /**
-     * Send a single string value to the cloud backend
-     */
-    bool System::sendTelemetry(const char* key, const char* value) {
-        #if ARDUINOJSON_VERSION_MAJOR >= 7
-        JsonDocument doc;
-        #else
-        StaticJsonDocument<128> doc;
+    #if INTEGRALL_JSON_AVAILABLE
+    if (out) {
+        (*out)["fw"] = INTEGRALL_VERSION_STRING;
+        (*out)["uptime_s"] = millis() / 1000UL;
+        #if defined(ESP32) || defined(ESP8266)
+        (*out)["heap"] = ESP.getFreeHeap();
         #endif
-        doc[key] = value;
-        return _device_manager.sendTelemetry(doc);
-    }
-
-    /**
-     * Send a full JSON document to the cloud backend
-     */
-    bool System::sendTelemetry(const JsonDocument& data) {
-        return _device_manager.sendTelemetry(data);
+        #if INTEGRALL_NETWORK_AVAILABLE
+        if (isWiFiConnected()) (*out)["rssi"] = getWiFiStrength();
+        #endif
+        (*out)["missing"] = missing;
     }
     #endif
+    #if INTEGRALL_DEBUG_LEVEL > 0
+    if (pr) {
+        Serial.print(F("=== "));
+        Serial.print(missing);
+        Serial.println(F(" part(s) missing ===\n"));
+    }
+    #endif
+    return missing;
+}
+
+// ============================================================================
+// MQTT WIRING
+// ============================================================================
+#if INTEGRALL_MODULE_MQTT_ENABLED && INTEGRALL_NETWORK_AVAILABLE
+inline void System::_startMqtt(const DeviceConfig& cfg) {
+    MqttConfig m;
+    m.host = cfg.mqtt_host;
+    m.port = cfg.mqtt_port;
+    m.tls  = cfg.mqtt_tls;
+    // "mqtt://host[:port]" or "mqtts://host[:port]" in backend_url
+    static char urlHost[64];
+    const char* url = cfg.backend_url;
+    if (!m.host && url) {
+        const bool tls = strncmp(url, "mqtts://", 8) == 0;
+        if (tls || strncmp(url, "mqtt://", 7) == 0) {
+            const char* h = url + (tls ? 8 : 7);
+            const char* colon = strchr(h, ':');
+            const char* slash = strchr(h, '/');
+            size_t n = colon ? (size_t)(colon - h) : (slash ? (size_t)(slash - h) : strlen(h));
+            if (n >= sizeof(urlHost)) n = sizeof(urlHost) - 1;
+            memcpy(urlHost, h, n); urlHost[n] = '\0';
+            m.host = urlHost;
+            m.tls = tls;
+            if (colon) m.port = (uint16_t)atoi(colon + 1);
+        }
+    }
+    if (!m.host) {
+        INTEGRALL_LOG_WARN("MQTT enabled but no broker: set backend_url \"mqtt://host\" or mqtt_host");
+        return;
+    }
+    if (m.port == 0) m.port = m.tls ? 8883 : 1883;
+    m.rootCA = cfg.mqtt_root_ca;
+    m.password = cfg.api_key;
+    if (_mqtt_module.begin(m, getDeviceId())) {
+        _mqtt_module.setHooks(&System::_mqttConnected, &System::_mqttBuiltin, this,
+                              [](void* ctx) { static_cast<System*>(ctx)->_health_sent = false; });
+    }
+}
+
+inline void System::_mqttConnected(void* ctx) {
+    System* self = static_cast<System*>(ctx);
+    JsonDocument meta;
+    meta["fw"] = INTEGRALL_VERSION_STRING;
+    #if defined(ARDUINO_BOARD)
+    meta["board"] = ARDUINO_BOARD;
+    #endif
+    #if defined(ESP32)
+    meta["chip"] = ESP.getChipModel();
+    #else
+    meta["chip"] = "ESP8266";
+    #endif
+    meta["ip"] = self->getIPAddress();
+    meta["mac"] = WiFi.macAddress();
+    JsonArray mods = meta["modules"].to<JsonArray>();
+    #if INTEGRALL_MODULE_RELAY_ENABLED
+    mods.add("relay");
+    #endif
+    #if INTEGRALL_MODULE_SENSORS_ENABLED
+    mods.add("sensors");
+    #endif
+    #if INTEGRALL_MODULE_IMU_ENABLED
+    mods.add("imu");
+    #endif
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    mods.add("lcd");
+    #endif
+    #if INTEGRALL_MODULE_OLED_ENABLED
+    mods.add("oled");
+    #endif
+    #if INTEGRALL_MODULE_BUZZER_ENABLED
+    mods.add("buzzer");
+    #endif
+    #if INTEGRALL_MODULE_SERVO_ENABLED
+    mods.add("servo");
+    #endif
+    #if INTEGRALL_MODULE_KEYPAD_ENABLED
+    mods.add("keypad");
+    #endif
+    #if INTEGRALL_MODULE_CAMERA_ENABLED
+    mods.add("camera");
+    #endif
+    #if INTEGRALL_MODULE_CELLULAR_ENABLED
+    mods.add("cellular");
+    #endif
+    #if INTEGRALL_MODULE_STEPPER_ENABLED
+    mods.add("stepper");
+    #endif
+    #if INTEGRALL_MODULE_RGB_ENABLED
+    mods.add("rgb");
+    #endif
+    #if INTEGRALL_MODULE_RELAY_ENABLED
+    JsonArray rl = meta["relays"].to<JsonArray>();
+    for (uint8_t i = 0; i < INTEGRALL_MAX_RELAYS; i++) {
+        if (!self->_relay_module.isValid(i)) continue;
+        JsonObject r = rl.add<JsonObject>();
+        r["index"] = i;
+        r["name"] = self->_relay_module.getName(i) ? self->_relay_module.getName(i) : "";
+        r["on"] = self->_relay_module.isOn(i);
+    }
+    #endif
+    if (self->_switch_count) {
+        JsonArray sw = meta["switches"].to<JsonArray>();
+        for (uint8_t i = 0; i < self->_switch_count; i++) {
+            JsonObject o = sw.add<JsonObject>();
+            o["name"] = self->_switches[i].name;
+            o["on"] = self->_switches[i].get();
+        }
+    }
+    self->_mqtt_module.publishJson("meta", meta, 1, true);
+    if (!self->_health_sent) { self->_health_sent = true; self->publishHealth(); }
+}
+
+inline void System::_mqttBuiltin(void* ctx, const char* action, JsonVariantConst args, CommandReply& reply) {
+    System* self = static_cast<System*>(ctx);
+    if (strcmp(action, "ping") == 0) { reply.ok("pong"); return; }
+    if (strcmp(action, "health") == 0) { self->publishHealth(); reply.ok(); return; }
+    if (strcmp(action, "reboot") == 0) { self->_reboot_at = millis() + 1000; reply.ok("rebooting in 1 s"); return; }
+    if (strncmp(action, "switch.", 7) == 0) {
+        const int i = self->_findSwitch(args["name"] | (const char*)nullptr);
+        if (i < 0) { reply.fail("unknown switch name"); return; }
+        if (strcmp(action, "switch.set") == 0) {
+            if (!args["on"].is<bool>()) { reply.fail("args.on (bool) required"); return; }
+            self->_switches[i].set(args["on"].as<bool>());
+        } else if (strcmp(action, "switch.toggle") == 0) {
+            self->_switches[i].set(!self->_switches[i].get());
+        } else if (strcmp(action, "switch.get") != 0) {
+            return;                                          // unknown switch.* -> unknown action
+        }
+        reply.ok();
+        reply.result()["on"] = self->_switches[i].get();
+        return;
+    }
+    #if INTEGRALL_MODULE_RELAY_ENABLED
+    if (strncmp(action, "relay.", 6) == 0) {
+        const int idx = args["index"] | -1;
+        if (strcmp(action, "relay.all_off") == 0) { self->allRelaysOff(); reply.ok(); return; }
+        if (!self->_relay_module.isValid((uint8_t)idx) || idx < 0) { reply.fail("bad relay index"); return; }
+        bool done = true;
+        if (strcmp(action, "relay.set") == 0) {
+            if (!args["on"].is<bool>()) { reply.fail("args.on (bool) required"); return; }
+            done = self->_relay_module.setState((uint8_t)idx, args["on"].as<bool>());
+        } else if (strcmp(action, "relay.toggle") == 0) {
+            done = self->_relay_module.toggle((uint8_t)idx);
+        } else if (strcmp(action, "relay.get") != 0) {
+            return;                                          // unknown relay.* -> unknown action
+        }
+        if (!done) { reply.fail("refused by interlock"); return; }
+        reply.ok();
+        reply.result()["on"] = self->_relay_module.isOn((uint8_t)idx);
+        return;
+    }
+    #endif
+    #if INTEGRALL_MODULE_BUZZER_ENABLED
+    if (strcmp(action, "buzzer.beep") == 0) { self->buzzerBeep(args["ms"] | 200); reply.ok(); return; }
+    if (strcmp(action, "buzzer.on") == 0)   { self->buzzerOn(args["freq"] | 2000); reply.ok(); return; }
+    if (strcmp(action, "buzzer.off") == 0)  { self->buzzerOff(); reply.ok(); return; }
+    #endif
+    #if INTEGRALL_MODULE_SERVO_ENABLED
+    if (strcmp(action, "servo.set") == 0) {
+        const int angle = args["angle"] | -1;
+        if (angle < 0 || angle > 180) { reply.fail("args.angle 0-180 required"); return; }
+        self->setServo((int)(args["index"] | 0), (uint8_t)angle);
+        reply.ok();
+        return;
+    }
+    #endif
+    #if INTEGRALL_MODULE_LCD_ENABLED
+    if (strcmp(action, "lcd.print") == 0) {
+        self->lcdPrint(args["text"] | "", args["col"] | 0, args["row"] | 0);
+        reply.ok();
+        return;
+    }
+    #endif
+    (void)self; (void)args;
+}
+#endif
 
 } // namespace Integrall
 

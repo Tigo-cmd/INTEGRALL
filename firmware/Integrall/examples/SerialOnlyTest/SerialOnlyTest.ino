@@ -1,50 +1,29 @@
 /**
- * SerialOnlyTest.ino - Testing Integrall without any hardware
- * 
- * This sketch demonstrates how Integrall handles the backend, 
- * identity, and logging using only the Serial Monitor.
+ * SerialOnlyTest.ino — run Integrall with NO hardware attached.
+ *
+ * Prints the device identity, uptime and a self-test (I2C scan + which
+ * enabled parts answer) to the Serial Monitor every 10 s. Handy as the very
+ * first sketch on a new board: if this runs, the toolchain and board are OK.
  */
-
 #include <Integrall.h>
 
 Integrall::System integrall;
 
 void setup() {
-    // Zero-config identification and serial initialization
-    integrall.begin();
+    integrall.begin();                     // offline; opens Serial at 115200
+    integrall.println("Device ID: %s", integrall.getDeviceId());
 }
 
 void loop() {
-    // Handle background polling and WiFi reconnection
     integrall.handle();
 
-    // Periodic Virtual Telemetry
-    static unsigned long lastUpdate = 0;
-    if (millis() - lastUpdate > 10000) {
-        lastUpdate = millis();
-
-        Serial.println("\n[SYSTEM REPORT]");
-        Serial.print("Uptime: "); Serial.println(millis() / 1000);
-        Serial.print("IP: "); Serial.println(integrall.getIPAddress());
-        Serial.print("Status: "); Serial.println(integrall.getStatusString());
-
-        // JSON and Telemetry are only available on IoT boards (ESP32/ESP8266)
+    static unsigned long last = 0;
+    if (millis() - last >= 10000) {
+        last = millis();
+        integrall.println("[report] uptime %lu s, state %s", millis() / 1000UL, integrall.getStatusString());
         #if defined(ESP32) || defined(ESP8266)
-        JsonDocument doc;
-        doc["uptime"] = millis() / 1000;
-        doc["ip"] = integrall.getIPAddress();
-        doc["status"] = integrall.getStatusString();
-        doc["free_heap"] = ESP.getFreeHeap();
-
-        serializeJsonPretty(doc, Serial);
-        Serial.println();
-
-        if (integrall.isOnline()) {
-            integrall.sendTelemetry(doc);
-            Serial.println(">> Telemetry synchronized with cloud.");
-        }
-        #else
-        Serial.println(">> (Offline) Cloud features disabled for this board.");
+        integrall.println("[report] free heap %lu bytes", (unsigned long)ESP.getFreeHeap());
         #endif
+        integrall.selfTest();              // I2C scan + module presence table
     }
 }

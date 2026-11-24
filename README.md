@@ -122,7 +122,7 @@ void loop() {
 
 Utility methods include: `isWiFiConnected()`, `getIPAddress()`, `getWiFiStrength()`, `httpGet()`, `httpPost()`, and more.
 
-> **NOTE on Backend**: v1.0.0 includes a production-ready **Flask/Python Backend** for device telemetry and live visualization. The React dashboard is fully integrated with the firmware's automated telemetry sync.
+> **Cloud (v1.2)**: `cloud/` contains the Integrall Cloud — Mosquitto (MQTT) + FastAPI + Postgres backend and a React dashboard (`docker compose up`). Devices connect with `#define INTEGRALL_ENABLE_MQTT` (see the `CloudMQTT` example). Commands are pushed instantly; nothing polls.
 
 ---
 
@@ -139,7 +139,7 @@ Utility methods include: `isWiFiConnected()`, `getIPAddress()`, `getWiFiStrength
                    (httpGet / httpPost)
 ```
 
-*When the cloud backend is released, devices will automatically register and sync telemetry through a central FastAPI server.*
+*With `INTEGRALL_ENABLE_MQTT`, devices keep one MQTT session to the Integrall Cloud (`cloud/`): telemetry and events flow up, commands are pushed down instantly.*
 
 ---
 
@@ -153,7 +153,8 @@ Utility methods include: `isWiFiConnected()`, `getIPAddress()`, `getWiFiStrength
 - [x] **Project Presets**: Smart Lock, Alarm System, Weather Station, Parking Sensor, Smart Switch.
 - [x] **v1.0 Backend**: 🐍 Flask cloud backend with device telemetry, live React dashboard, and redundant sensor analysis.
 - [x] **v1.1.0 Firmware & Core**: 100% non-blocking state machines, multi-arch (ESP32/ESP8266/AVR) & ArduinoJson v7 support, cached sensor/LCD drivers, MPU6050 IMU fall detection, and SIM800L Cellular SMS/Voice.
-- [ ] **v1.2 Fleet**: OTA Firmware Updates and MQTT Broker Integration.
+- [x] **v1.2**: header-only core, zero blocking calls, `selfTest()` part detection, MQTT cloud link, FastAPI + Postgres backend, live dashboard, host unit tests + Wokwi simulation.
+- [ ] **v1.3 Fleet**: OTA firmware updates from the dashboard.
 
 ## Contributing
 Integrall is an open-source project. We welcome contributions for new hardware modules, bug fixes, and documentation improvements.

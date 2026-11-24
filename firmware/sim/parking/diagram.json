@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "author": "Integrall",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-lcd1602", "id": "lcd", "top": -140, "left": 120, "attrs": { "pins": "i2c" } },
+    { "type": "wokwi-hc-sr04", "id": "sonar", "top": 120, "left": 160, "attrs": { "distance": "35" } },
+    { "type": "wokwi-buzzer", "id": "bz", "top": 150, "left": -120, "attrs": {} }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ], [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "lcd:SDA", "esp:21", "green", [] ], [ "lcd:SCL", "esp:22", "blue", [] ], [ "lcd:VCC", "esp:5V", "red", [] ], [ "lcd:GND", "esp:GND.1", "black", [] ],
+    [ "sonar:TRIG", "esp:5", "orange", [] ], [ "sonar:ECHO", "esp:18", "purple", [] ],
+    [ "sonar:VCC", "esp:5V", "red", [] ], [ "sonar:GND", "esp:GND.2", "black", [] ],
+    [ "bz:1", "esp:GND.2", "black", [] ], [ "bz:2", "esp:25", "red", [] ]
+  ]
+}

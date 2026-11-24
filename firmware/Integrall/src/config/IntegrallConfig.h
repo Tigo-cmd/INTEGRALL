@@ -14,13 +14,22 @@
   #define INTEGRALL_DEBUG_LEVEL 2 // Default to WARNING
 #endif
 
+#define INTEGRALL_VERSION_MAJOR 1
+#define INTEGRALL_VERSION_MINOR 2
+#define INTEGRALL_VERSION_PATCH 0
 #ifndef INTEGRALL_VERSION_STRING
-  #define INTEGRALL_VERSION_STRING "1.1.0"
+  #define INTEGRALL_VERSION_STRING "1.2.0"
 #endif
 
-#ifndef INTEGRALL_BACKEND_ENABLED
-  #define INTEGRALL_BACKEND_ENABLED 1
-#endif
+// ----------------------------------------------------------------------------
+// HOW TO ENABLE MODULES
+//  * Arduino IDE (single .ino): #define INTEGRALL_ENABLE_xxx before #include <Integrall.h>
+//  * PlatformIO / multi-file projects: put them in platformio.ini so EVERY
+//    source file sees the same set, e.g.
+//        build_flags = -D INTEGRALL_ENABLE_RELAY -D INTEGRALL_ENABLE_WIFI
+//    (Integrall is header-only; mismatched flags between .cpp files of one
+//    program would give them different views of Integrall::System.)
+// ----------------------------------------------------------------------------
 
 // Optional global credentials ("Set and Forget" mode)
 // Define these in your sketch BEFORE #include <Integrall.h> or edit here:
@@ -33,7 +42,7 @@
 // CORE HELPER MACROS
 // ============================================================================
 #ifndef INTEGRALL_SAFE_STRCPY
-  #define INTEGRALL_SAFE_STRCPY(dst, src, size) { strncpy(dst, src, size - 1); dst[size - 1] = '\0'; }
+  #define INTEGRALL_SAFE_STRCPY(dst, src, size) do { strncpy((dst), (src), (size) - 1); (dst)[(size) - 1] = '\0'; } while (0)
 #endif
 
 #ifndef INTEGRALL_HTTP_RETRY_ATTEMPTS
@@ -45,11 +54,31 @@
 // These are set by defining flags in your sketch BEFORE Integrall.h
 // ============================================================================
 
+// MQTT cloud link (implies WiFi)
+#ifdef INTEGRALL_ENABLE_MQTT
+  #define INTEGRALL_MODULE_MQTT_ENABLED 1
+  #ifndef INTEGRALL_ENABLE_WIFI
+    #define INTEGRALL_ENABLE_WIFI
+  #endif
+#else
+  #define INTEGRALL_MODULE_MQTT_ENABLED 0
+#endif
+
 // WiFi & Networking
 #ifdef INTEGRALL_ENABLE_WIFI
   #define INTEGRALL_MODULE_WIFI_ENABLED 1
 #else
   #define INTEGRALL_MODULE_WIFI_ENABLED 0
+#endif
+
+// Networking code is compiled only on WiFi-capable chips AND when requested.
+#if INTEGRALL_MODULE_WIFI_ENABLED && (defined(ESP32) || defined(ESP8266))
+  #define INTEGRALL_NETWORK_AVAILABLE 1
+#else
+  #define INTEGRALL_NETWORK_AVAILABLE 0
+  #if INTEGRALL_MODULE_WIFI_ENABLED
+    #warning "Integrall: INTEGRALL_ENABLE_WIFI ignored - this board has no WiFi (ESP32/ESP8266 only)."
+  #endif
 #endif
 
 // Relay Module
@@ -194,5 +223,14 @@
 #else
   #define INTEGRALL_MODULE_STEPPER_ENABLED 0
 #endif
+
+// ============================================================================
+// SENSOR VALUE HELPERS
+// Float readers return NAN when the sensor is missing / the read failed.
+// ============================================================================
+namespace Integrall {
+    /** true if a sensor reading is usable (not NAN / not infinite). */
+    inline bool valid(float v) { return !isnan(v) && !isinf(v); }
+}
 
 #endif // INTEGRALL_CONFIG_H

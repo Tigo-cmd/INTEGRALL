@@ -1,109 +1,115 @@
 /**
  * SmartFallDevice.ino
- * 
- * Powered by Integrall Framework.
- * A lightweight, non-blocking Fall Detection logic using MPU6050 and SIM800L.
- * Creates its own WiFi hotspot to host a Web Dashboard.
+ *
+ * Wearable fall detector: MPU6050 + buzzer + SIM800L, fully non-blocking.
+ * The ESP32 creates its own WiFi hotspot ("Integrall_Fall_Device", password
+ * "fallsafe123") with a dashboard at http://192.168.4.1 to set the emergency
+ * phone number.
+ *
+ * Flow (a state machine — loop() never stalls):
+ *   MONITORING --impact + horizontal--> CONFIRMING (2 s: did they get up?)
+ *   CONFIRMING --still horizontal-->     ALARM (buzzer, 10 s to cancel)
+ *   ALARM      --hold button 3 s-->      MONITORING (cancelled)
+ *   ALARM      --10 s elapsed-->         SMS queued -> COOLDOWN (30 s) -> MONITORING
+ *
+ * Wiring: MPU6050 SDA 21 / SCL 22, buzzer 27, cancel button 26 -> GND,
+ *         SIM800L TX->16, RX->17 (separate 4 V / 2 A supply!).
  */
 
 #define INTEGRALL_ENABLE_WIFI
 #define INTEGRALL_ENABLE_CELLULAR
-#define INTEGRALL_ENABLE_SENSORS
 #define INTEGRALL_ENABLE_IMU
 #define INTEGRALL_ENABLE_BUZZER
 #define INTEGRALL_ENABLE_INPUT
 #define INTEGRALL_DEBUG_LEVEL 3
 #include <Integrall.h>
 
-// Global Integrall Instance
 Integrall::System integrall;
 
-// Include the separate dashboard logic
 #include "Dashboard.h"
 
-// Alert states
-bool alarmActive = false;
-unsigned long fallTime = 0;
+const uint8_t BUZZER_PIN = 27;
+const uint8_t CANCEL_BTN = 26;
+
+// Impact threshold in m/s^2 (1 g = 9.81). ~2.5 g catches real falls, not walking.
+const float IMPACT_THRESHOLD = 25.0f;
+
+enum class FallState { MONITORING, CONFIRMING, ALARM, COOLDOWN };
+FallState state = FallState::MONITORING;
+unsigned long stateSince = 0;
+unsigned long holdStart = 0;
+
+void enter(FallState s) { state = s; stateSince = millis(); }
+
+void onSmsResult(bool ok) {
+    integrall.println(ok ? "SMS delivered to network" : "SMS FAILED - check SIM/credit/signal");
+    lastSmsStatus = ok ? "sent" : "failed";
+}
 
 void setup() {
-    // 1. Integrall Initialization
-    // Creates an open Hotspot (AP Mode) so you can connect directly with your phone!
-    integrall.beginAP("Integrall_Fall_Device");
+    integrall.beginAP("Integrall_Fall_Device", "fallsafe123");
 
-    // Start Integrall Internal Modules
-    integrall.enableIMU(21, 22);                    // I2C MPU6050 Data/Clock
-    integrall.enableBuzzer(27);                     // Buzzer Pin
-    
-    // Manual Button Pin (InputModule is for debounced clicks, we need raw holds)
-    pinMode(26, INPUT_PULLUP);
-    
-    // Uncomment once your SIM800L module is wired!
-    // integrall.cellularBegin(16, 17);  
-    
-    // 2. Start Dashboard
+    if (!integrall.enableIMU(21, 22)) integrall.println("MPU6050 missing - fall detection disabled");
+    integrall.enableBuzzer(BUZZER_PIN);
+    integrall.cellularBegin(16, 17);        // returns immediately; modem initialises in background
+    integrall.onSMSResult(onSmsResult);
+
     setupDashboard();
+    integrall.selfTest();
 }
 
 void loop() {
-    integrall.handle();        // Background network recovery & AT commands
-    handleDashboard();         // Handle local Web Dashboard
+    integrall.handle();                     // WiFi AP, web dashboard, modem AT engine, buzzer...
+    const unsigned long now = millis();
 
-    // ==========================================
-    // ADVANCED FALL DETECTION LOGIC
-    // ==========================================
-    if (!alarmActive) {
-        // Did a sudden 20G impact occur AND did device instantly become horizontal?
-        if (integrall.getImpactForce() > 20.0 && integrall.isHorizontal()) {
-            
-            // Wait 2 seconds to see if they immediately stand back up
-            delay(2000); 
-            
-            // False Alarm Check! Are they still horizontal? (i.e. lying on the floor)
-            if (integrall.isHorizontal()) {
-                INTEGRALL_LOG_INFO("⚠ CRITICAL FALL VERIFIED!");
-                alarmActive = true;
-                fallTime = millis();
-                
-                // Integrall takes over the continuous buzzing pattern here
-                integrall.buzzerAlert(); 
+    switch (state) {
+        case FallState::MONITORING:
+            if (integrall.getImpactForce() > IMPACT_THRESHOLD && integrall.isHorizontal()) {
+                INTEGRALL_LOG_INFO("Impact detected, confirming...");
+                enter(FallState::CONFIRMING);
             }
-        }
-    }
+            break;
 
-    // ==========================================
-    // SMS DISPATCH TIMER
-    // ==========================================
-    if (alarmActive && (millis() - fallTime > 10000)) {
-        INTEGRALL_LOG_INFO(">> Timeout reached! Sending automated SMS...");
-        integrall.buzzerOff();
-        
-        // emergencyNumber is pulled from the Dashboard (EEPROM)
-        integrall.sendSMS(emergencyNumber.c_str(), "ALERT! Fall Detected. Please check on the user.");
-        
-        alarmActive = false; 
-        delay(5000); // Prevent rapid re-triggering
-    }
-
-    // ==========================================
-    // MANUAL CANCEL BUTTON (3 Second Hold)
-    // ==========================================
-    if (alarmActive && digitalRead(26) == LOW) {
-        unsigned long holdStart = millis();
-        bool cancelled = true;
-        
-        while (millis() - holdStart < 3000) {
-            // If they let go of the button early, abort cancel
-            if (digitalRead(26) == HIGH) {
-                cancelled = false; 
-                break;
+        case FallState::CONFIRMING:          // give them 2 s to get back up
+            if (now - stateSince >= 2000) {
+                if (integrall.isHorizontal()) {
+                    INTEGRALL_LOG_INFO("FALL CONFIRMED");
+                    enter(FallState::ALARM);
+                } else {
+                    enter(FallState::MONITORING);
+                }
             }
-            delay(10); 
-        }
-        
-        if (cancelled) {
-            INTEGRALL_LOG_INFO(">> Alarm Manually Cancelled!");
-            alarmActive = false;
-            integrall.buzzerOff();
-        }
+            break;
+
+        case FallState::ALARM:
+            if (!integrall.buzzerIsActive()) integrall.buzzerAlert();   // keep sounding
+            // Cancel by holding the button for 3 s
+            if (integrall.inputButtonHeld(CANCEL_BTN)) {
+                if (holdStart == 0) holdStart = now;
+                if (now - holdStart >= 3000) {
+                    INTEGRALL_LOG_INFO("Alarm cancelled by user");
+                    integrall.buzzerOff();
+                    holdStart = 0;
+                    enter(FallState::MONITORING);
+                    break;
+                }
+            } else {
+                holdStart = 0;
+            }
+            if (now - stateSince >= 10000) {
+                integrall.buzzerOff();
+                if (!integrall.sendSMS(emergencyNumber.c_str(), "ALERT! Fall detected. Please check on the user.")) {
+                    integrall.println("SMS could not be queued");
+                    lastSmsStatus = "not queued";
+                } else {
+                    lastSmsStatus = "sending...";
+                }
+                enter(FallState::COOLDOWN);
+            }
+            break;
+
+        case FallState::COOLDOWN:            // avoid re-triggering while they are still down
+            if (now - stateSince >= 30000) enter(FallState::MONITORING);
+            break;
     }
 }

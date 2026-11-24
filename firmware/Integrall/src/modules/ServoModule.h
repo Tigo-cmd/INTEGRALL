@@ -32,7 +32,7 @@ public:
     ServoModule() {
         for (int i = 0; i < INTEGRALL_MAX_SERVOS; i++) {
             _attached[i] = false;
-            _current_angle[i] = 0;
+            _current_angle[i] = -1;   // unknown until first write
             _target_angle[i] = 0;
             _speed_ms[i] = 15;
             _last_move[i] = 0;
@@ -77,9 +77,9 @@ public:
         if (index < 0 || index >= INTEGRALL_MAX_SERVOS || !_attached[index]) return;
         int val = analogRead(pin);
         #if defined(ESP32)
-        int angle = map(val, 0, 4095, 0, 180);
+        long angle = map(val, 0, 4095, 0, 180);
         #else
-        int angle = map(val, 0, 1023, 0, 180);
+        long angle = map(val, 0, 1023, 0, 180);
         #endif
         set(index, (uint8_t)constrain(angle, 0, 180));
     }
@@ -89,6 +89,7 @@ public:
      */
     void sweep(int index, uint32_t speed_ms = 15) {
         if (index < 0 || index >= INTEGRALL_MAX_SERVOS || !_attached[index]) return;
+        if (_current_angle[index] < 0) set(index, 0);
         _speed_ms[index] = speed_ms;
         _mode[index] = 1;
     }
@@ -99,6 +100,10 @@ public:
     void easeTo(int index, uint8_t angle, uint32_t speed_ms = 15) {
         if (index < 0 || index >= INTEGRALL_MAX_SERVOS || !_attached[index]) return;
         if (angle > 180) angle = 180;
+        if (_current_angle[index] < 0) {   // position unknown: can't ease, go directly
+            set(index, angle);
+            return;
+        }
         _target_angle[index] = angle;
         _speed_ms[index] = speed_ms;
         _mode[index] = 2;
@@ -107,6 +112,20 @@ public:
     /**
      * Background handler for animations
      */
+    /** Last commanded angle, or -1 if never set. */
+    int getAngle(int index) const {
+        return (index >= 0 && index < INTEGRALL_MAX_SERVOS && _attached[index]) ? _current_angle[index] : -1;
+    }
+
+    /** Release the pin (servo goes limp, stops buzzing). */
+    void detach(int index) {
+        if (index < 0 || index >= INTEGRALL_MAX_SERVOS || !_attached[index]) return;
+        _servo[index].detach();
+        _attached[index] = false;
+        _mode[index] = 0;
+        _current_angle[index] = -1;
+    }
+
     void handle() {
         unsigned long now = millis();
         for (int i = 0; i < INTEGRALL_MAX_SERVOS; i++) {
